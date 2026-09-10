@@ -155,7 +155,7 @@ class ScanForegroundService : LifecycleService() {
             "Scan status",
             NotificationManager.IMPORTANCE_LOW, // silent; detection chirps come from AlertSounds
         ).apply {
-            description = "Shown while a Flock You scan session is running"
+            description = "Shown while a scan session is running"
             setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)
@@ -179,7 +179,7 @@ class ScanForegroundService : LifecycleService() {
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_scan)
-            .setContentTitle("Flock You")
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
             .setSubText(if (total > 0) "$flock Flock · $raven Raven" else null)
             .setContentIntent(openApp)

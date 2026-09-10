@@ -27,5 +27,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Flock You"
+rootProject.name = "Flock You Companion"
 include(":app")

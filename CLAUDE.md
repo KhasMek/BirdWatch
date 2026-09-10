@@ -1,9 +1,12 @@
-# CLAUDE.md — Flock-You Android
+# CLAUDE.md — Flock You Companion (Android)
 
 ## Project Goal
 
-A native Android app (Kotlin, Jetpack Compose) that is a phone-native replacement for the
-[flock-you](https://github.com/colonelpanichacks/flock-you) Flask dashboard. It detects Flock Safety
+**Flock You Companion** is a native Android app (Kotlin, Jetpack Compose) that is a phone-native
+replacement for the [flock-you](https://github.com/colonelpanichacks/flock-you) Flask dashboard.
+The name is deliberate: the phone is the *companion* to an ESP32 that does the camera sniffing.
+The user-facing label lives in `res/values/strings.xml` (`app_name`); the `applicationId`
+stays `com.khasmek.flockyou` and must not change (it is the install identity). It detects Flock Safety
 surveillance cameras and SoundThinking/ShotSpotter Raven gunshot detectors and GPS-tags every hit
 for wardriving.
 

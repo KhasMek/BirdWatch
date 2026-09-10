@@ -37,9 +37,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.khasmek.flockyou.R
 import com.khasmek.flockyou.ui.appViewModel
 import com.khasmek.flockyou.ui.components.DeviceCard
 import com.khasmek.flockyou.ui.components.ExportFormatDialog
@@ -85,7 +87,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
             TopAppBar(
                 title = {
                     Column {
-                        Text("Flock You")
+                        Text(stringResource(R.string.app_name))
                         state.session?.let {
                             Text(
                                 text = "Session ${TimeFormat.duration(it.durationMillis(now))}",

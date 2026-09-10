@@ -140,8 +140,9 @@ private fun PermissionRationaleScreen(
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = "Flock You scans for nearby Bluetooth LE devices to detect Flock Safety cameras " +
-                    "and Raven gunshot detectors. Android requires the following permissions for BLE scanning:",
+                text = "Flock You Companion scans nearby Bluetooth LE devices for Raven gunshot detectors and " +
+                    "ingests Flock camera detections from an ESP32 over USB. Android requires the following " +
+                    "permissions for BLE scanning:",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center
             )

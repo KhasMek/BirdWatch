@@ -40,7 +40,7 @@ object ExportWriter {
 
     fun json(session: ScanSession, devices: List<DetectedDevice>, exportedAt: Long): String {
         val root = buildJsonObject {
-            put("app", "flock-you-android")
+            put("app", "flock-you-companion")
             put("exported_at", iso(exportedAt))
             put("session", buildJsonObject {
                 put("id", session.id)
@@ -102,7 +102,7 @@ object ExportWriter {
         appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
         appendLine("""<kml xmlns="http://www.opengis.net/kml/2.2">""")
         appendLine("<Document>")
-        appendLine("  <name>${xml("Flock You session " + isoCompact(session.startedAt))}</name>")
+        appendLine("  <name>${xml("Flock You Companion session " + isoCompact(session.startedAt))}</name>")
         appendLine("  <description>${xml("${devices.size} devices, ${located.size} with GPS. Session ${session.id}")}</description>")
         appendLine("""  <Style id="flock"><IconStyle><color>ff0051e6</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/orange-circle.png</href></Icon></IconStyle></Style>""")
         appendLine("""  <Style id="raven"><IconStyle><color>ff9a1b6a</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/purple-circle.png</href></Icon></IconStyle></Style>""")

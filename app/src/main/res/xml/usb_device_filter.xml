@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Espressif (0x303A) native USB: ESP32-S3 USB JTAG/serial (0x1001) and TinyUSB CDC (0x0002).
-     Matching this filter lets Android offer to open Flock You when the XIAO is plugged in and
+     Matching this filter lets Android offer to open the app when the XIAO is plugged in and
      grants USB permission for that device without a separate prompt. -->
 <resources>
     <usb-device vendor-id="12346" product-id="4097" />
