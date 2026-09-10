@@ -5,6 +5,7 @@ import android.content.Context
 import com.khasmek.flockyou.audio.AlertSounds
 import com.khasmek.flockyou.data.AppSettings
 import com.khasmek.flockyou.data.DetectionDatabase
+import com.khasmek.flockyou.data.SecureSettings
 import com.khasmek.flockyou.data.SessionManager
 import com.khasmek.flockyou.detection.BleScanner
 import com.khasmek.flockyou.location.LocationProvider
@@ -18,12 +19,13 @@ import kotlinx.coroutines.SupervisorJob
  * touches Bluetooth or GPS before permissions are granted.
  */
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     /** Process-wide scope for background work that outlives any screen (persistence, radios). */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settings: AppSettings by lazy { AppSettings(appContext) }
+    val secureSettings: SecureSettings by lazy { SecureSettings(appContext, appScope) }
     val database: DetectionDatabase by lazy { DetectionDatabase.build(appContext) }
     val bleScanner: BleScanner by lazy { BleScanner(appContext) }
     val usbCompanion: UsbCompanion by lazy { UsbCompanion(appContext, appScope) }

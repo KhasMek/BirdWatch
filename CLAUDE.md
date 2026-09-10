@@ -210,7 +210,11 @@ works without a key. Help link: https://developers.google.com/maps/documentation
    app UI is backgrounded — **done, device-verified**. `SessionManager.start()` routes through
    `ScanForegroundService.start()`; the service observes `currentSession` and stops itself when
    it becomes null, so every stop path (FAB, notification action, programmatic) converges.
-7. Settings (API key, toggles) + Map screen with typed markers
+7. Settings (API key, toggles) + Map screen with typed markers — **done, device-verified**.
+   Runtime key injection confirmed: the Maps SDK's authorization-failure log echoed the key read
+   from EncryptedSharedPreferences. There is no SDK callback for a bad key (gray tiles only), so
+   validation is a format check (39 chars, `AIza` prefix) plus visual confirmation. A changed key
+   needs an app restart because the SDK caches the first key it reads.
 8. Export (JSON/CSV/KML via share sheet) + Sessions screen (list, detail, export, delete)
 
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest

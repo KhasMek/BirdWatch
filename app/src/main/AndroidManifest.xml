@@ -45,6 +45,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.FlockYou">
+
+        <!-- Intentionally empty. The user's key is injected at runtime by MapsKeyInjector.
+             Never put a real key here. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
