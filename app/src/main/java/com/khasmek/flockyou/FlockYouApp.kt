@@ -6,6 +6,7 @@ import com.khasmek.flockyou.data.DetectionDatabase
 import com.khasmek.flockyou.data.SessionManager
 import com.khasmek.flockyou.detection.BleScanner
 import com.khasmek.flockyou.location.LocationProvider
+import com.khasmek.flockyou.usb.UsbCompanion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,9 +23,10 @@ class AppContainer(context: Context) {
 
     val database: DetectionDatabase by lazy { DetectionDatabase.build(appContext) }
     val bleScanner: BleScanner by lazy { BleScanner(appContext) }
+    val usbCompanion: UsbCompanion by lazy { UsbCompanion(appContext, appScope) }
     val locationProvider: LocationProvider by lazy { LocationProvider(appContext) }
     val sessionManager: SessionManager by lazy {
-        SessionManager(database, bleScanner, locationProvider, appScope)
+        SessionManager(database, bleScanner, usbCompanion, locationProvider, appScope)
     }
 }
 

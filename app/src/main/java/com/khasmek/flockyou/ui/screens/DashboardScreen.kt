@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +35,7 @@ fun DashboardScreen() {
     val sessionManager = container.sessionManager
 
     val status by scanner.status.collectAsStateWithLifecycle()
+    val usb by container.usbCompanion.state.collectAsStateWithLifecycle()
     val location by container.locationProvider.state.collectAsStateWithLifecycle()
     val session by sessionManager.currentSession.collectAsStateWithLifecycle()
     val devices by sessionManager.observeCurrentDevices().collectAsStateWithLifecycle(emptyList())
@@ -62,11 +64,24 @@ fun DashboardScreen() {
         status.warning?.let {
             Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
         }
+        Text(
+            text = "USB: ${usb.status.label}" +
+                (usb.deviceDescription?.let { " · $it" } ?: "") +
+                (if (usb.isConnected) " · ${usb.linesReceived} lines, ${usb.detectionsReceived} hits" else ""),
+            style = MaterialTheme.typography.bodySmall
+        )
+        usb.error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+        usb.lastText?.let {
+            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+        }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { if (session != null) sessionManager.stop() else sessionManager.start() }) {
                 Text(if (session != null) "Stop session" else "Start session")
             }
+            OutlinedButton(onClick = { container.usbCompanion.connect() }) { Text("Connect USB") }
         }
         Spacer(Modifier.height(12.dp))
         Text("Persisted this session: ${devices.size}", style = MaterialTheme.typography.titleMedium)

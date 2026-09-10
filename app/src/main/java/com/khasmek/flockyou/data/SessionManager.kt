@@ -5,11 +5,14 @@ import android.util.Log
 import androidx.room.withTransaction
 import com.khasmek.flockyou.detection.BleScanner
 import com.khasmek.flockyou.detection.DetectedDevice
+import com.khasmek.flockyou.detection.DetectionTable
 import com.khasmek.flockyou.location.LocationProvider
+import com.khasmek.flockyou.usb.UsbCompanion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,17 +29,19 @@ import java.util.UUID
  * Owns the scan-session lifecycle: one UUID per session, start/end timestamps, and persisting
  * detections from every source into Room while a session is running.
  *
- * Starting a session starts GPS updates and the BLE scanner (the ESP32 USB reader joins in
- * Phase 4). Stopping flushes the in-memory table, stops the radios and closes the session row.
+ * Starting a session starts GPS updates, the phone BLE scanner and the ESP32 USB companion
+ * (which connects if a device is attached, and auto-connects if one is plugged in later).
+ * Stopping flushes both in-memory tables, stops the radios and closes the session row.
  *
- * Persistence strategy:
- *  - a brand-new MAC is written immediately (from [BleScanner.newDetections]);
- *  - re-sightings (RSSI, lastSeen, GPS, count) are batched every [RESIGHT_FLUSH_MS] via `sample`
- *    so a chatty beacon does not hammer the database.
+ * Persistence strategy, per source:
+ *  - a brand-new MAC is written immediately (from the table's `newDetections`);
+ *  - re-sightings (RSSI, lastSeen, GPS, count, tier upgrades) are batched every
+ *    [RESIGHT_FLUSH_MS] via `sample` so a chatty beacon does not hammer the database.
  */
 class SessionManager(
     private val db: DetectionDatabase,
     private val bleScanner: BleScanner,
+    private val usbCompanion: UsbCompanion,
     private val locationProvider: LocationProvider,
     private val scope: CoroutineScope,
 ) {
@@ -71,12 +76,20 @@ class SessionManager(
         val session = ScanSession(id = UUID.randomUUID().toString(), startedAt = System.currentTimeMillis())
         sessionDao.insert(session)
 
+        val fixSource = { locationProvider.currentFix() }
+
         bleScanner.clear()
         bleScanner.sessionId = session.id
-        bleScanner.locationSource = { locationProvider.currentFix() }
+        bleScanner.locationSource = fixSource
+
+        usbCompanion.clear()
+        usbCompanion.sessionId = session.id
+        usbCompanion.locationSource = fixSource
+        usbCompanion.wantConnection = true
 
         locationProvider.start()
         bleScanner.start(scanMode)
+        usbCompanion.connect()
 
         persistJob = scope.launch { persistLoop() }
         _currentSession.value = session
@@ -88,12 +101,14 @@ class SessionManager(
         val session = _currentSession.value ?: return@withLock
 
         bleScanner.stop()
+        usbCompanion.wantConnection = false
+        usbCompanion.disconnect()
         locationProvider.stop()
         persistJob?.cancel()
         persistJob = null
 
         // Final flush so the last few re-sightings land in the database.
-        val snapshot = bleScanner.devices.value
+        val snapshot = bleScanner.table.snapshot() + usbCompanion.table.snapshot()
         if (snapshot.isNotEmpty()) detectionDao.upsertAll(snapshot)
 
         sessionDao.update(session.copy(endedAt = System.currentTimeMillis()))
@@ -131,11 +146,16 @@ class SessionManager(
 
     // ------------------------------------------------------------------
 
+    private suspend fun persistLoop() = coroutineScope {
+        launch { persist(bleScanner.table) }
+        launch { persist(usbCompanion.table) }
+    }
+
     @OptIn(FlowPreview::class)
-    private suspend fun persistLoop() = kotlinx.coroutines.coroutineScope {
-        launch { bleScanner.newDetections.collect { detectionDao.upsert(it) } }
+    private suspend fun persist(table: DetectionTable) = coroutineScope {
+        launch { table.newDetections.collect { detectionDao.upsert(it) } }
         launch {
-            bleScanner.devices.sample(RESIGHT_FLUSH_MS).collect { devices ->
+            table.devices.sample(RESIGHT_FLUSH_MS).collect { devices ->
                 if (devices.isNotEmpty()) detectionDao.upsertAll(devices)
             }
         }

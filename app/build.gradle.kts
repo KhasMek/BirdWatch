@@ -65,6 +65,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
+    // ESP32 companion: USB CDC serial + JSON line parsing (JsonElement API only, no compiler plugin)
+    implementation(libs.usb.serial.android)
+    implementation(libs.kotlinx.serialization.json)
+
     // Room
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)

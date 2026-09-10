@@ -14,11 +14,9 @@ import android.util.Log
 import androidx.core.location.LocationManagerCompat
 import com.khasmek.flockyou.location.GeoFix
 import com.khasmek.flockyou.util.Permissions
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -36,12 +34,12 @@ data class ScanStatus(
 
 /**
  * Continuous BLE scanning on top of [BluetoothLeScanner]. Every [ScanResult] is converted to a
- * framework-free [BleAdvertisement] and run through [DeviceClassifier]. Matches are de-duplicated
- * by MAC address: a re-sighting updates RSSI, name (if newly available), lastSeen and the
- * sighting count, exactly like the firmware's `fyAddDetection()`.
+ * framework-free [BleAdvertisement] and run through [DeviceClassifier]. Matches land in a
+ * [DetectionTable] keyed by MAC: a re-sighting updates RSSI, name (if newly available), lastSeen
+ * and the sighting count, exactly like the firmware's `fyAddDetection()`.
  *
- * Thread-safety: [ScanCallback] runs on a binder thread; state lives in [MutableStateFlow]s whose
- * `update {}` is atomic, and the device table is guarded by [lock].
+ * Thread-safety: [ScanCallback] runs on a binder thread; [DetectionTable] and the status
+ * [MutableStateFlow] are both safe to touch from there.
  */
 class BleScanner(context: Context) {
 
@@ -49,19 +47,16 @@ class BleScanner(context: Context) {
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
     private val adapter: BluetoothAdapter? get() = bluetoothManager?.adapter
 
-    private val lock = Any()
-    private val byMac = LinkedHashMap<String, DetectedDevice>()
+    val table = DetectionTable()
 
     private val _status = MutableStateFlow(ScanStatus())
     val status: StateFlow<ScanStatus> = _status.asStateFlow()
 
-    private val _devices = MutableStateFlow<List<DetectedDevice>>(emptyList())
     /** All unique matched devices, most recently seen first. */
-    val devices: StateFlow<List<DetectedDevice>> = _devices.asStateFlow()
+    val devices: StateFlow<List<DetectedDevice>> get() = table.devices
 
-    private val _newDetections = MutableSharedFlow<DetectedDevice>(extraBufferCapacity = 64)
     /** Emits once per MAC the first time it is matched. Drives audio alerts. */
-    val newDetections: SharedFlow<DetectedDevice> = _newDetections.asSharedFlow()
+    val newDetections: SharedFlow<DetectedDevice> get() = table.newDetections
 
     /** Set by SessionManager: returns the current GPS fix to stamp on detections, or null. */
     @Volatile
@@ -71,6 +66,7 @@ class BleScanner(context: Context) {
     @Volatile
     var sessionId: String = ""
 
+    private val rawLock = Any()
     private var rawCount = 0L
     private var lastRawPublish = 0L
     private var activeCallback: ScanCallback? = null
@@ -130,11 +126,8 @@ class BleScanner(context: Context) {
 
     /** Drop every detection and reset counters. Does not affect scanning state. */
     fun clear() {
-        synchronized(lock) {
-            byMac.clear()
-            rawCount = 0
-        }
-        _devices.value = emptyList()
+        table.clear()
+        synchronized(rawLock) { rawCount = 0 }
         _status.update { it.copy(rawAdvertisements = 0) }
     }
 
@@ -216,16 +209,14 @@ class BleScanner(context: Context) {
         val classification = DeviceClassifier.classify(adv) ?: return
         val now = System.currentTimeMillis()
         val fix = locationSource?.invoke()
+        val mac = DetectionTable.normalizeMac(adv.macAddress)
 
-        var isNew = false
-        val updated: DetectedDevice
-        synchronized(lock) {
-            val existing = byMac[adv.macAddress]
-            updated = if (existing == null) {
-                isNew = true
+        val (stored, isNew) = table.upsert(
+            macAddress = mac,
+            create = {
                 DetectedDevice(
                     sessionId = sessionId,
-                    macAddress = adv.macAddress,
+                    macAddress = mac,
                     source = DetectionSource.BLE,
                     deviceName = adv.deviceName,
                     detectionMethod = classification.method,
@@ -241,7 +232,8 @@ class BleScanner(context: Context) {
                     lastSeen = now,
                     sightings = 1,
                 )
-            } else {
+            },
+            merge = { existing ->
                 existing.copy(
                     // Keep a name once we have one; a later nameless advert must not erase it.
                     deviceName = adv.deviceName?.takeIf { it.isNotBlank() } ?: existing.deviceName,
@@ -253,18 +245,15 @@ class BleScanner(context: Context) {
                     longitude = fix?.longitude ?: existing.longitude,
                     accuracyMeters = if (fix != null) fix.accuracyMeters else existing.accuracyMeters,
                 )
-            }
-            byMac[adv.macAddress] = updated
-            _devices.value = byMac.values.sortedByDescending { it.lastSeen }
-        }
+            },
+        )
 
         if (isNew) {
             Log.i(
-                TAG, "DETECTED ${updated.macAddress} \"${updated.displayName}\" rssi=${updated.rssi} " +
+                TAG, "DETECTED ${stored.macAddress} \"${stored.displayName}\" rssi=${stored.rssi} " +
                     "[${classification.method.wireName} on ${classification.matchedOn}]" +
                     (classification.ravenFirmware?.let { " fw=$it" } ?: "")
             )
-            _newDetections.tryEmit(updated)
         }
     }
 
@@ -272,7 +261,7 @@ class BleScanner(context: Context) {
         val now = System.currentTimeMillis()
         val count: Long
         val publish: Boolean
-        synchronized(lock) {
+        synchronized(rawLock) {
             count = ++rawCount
             publish = now - lastRawPublish >= RAW_PUBLISH_INTERVAL_MS
             if (publish) lastRawPublish = now
