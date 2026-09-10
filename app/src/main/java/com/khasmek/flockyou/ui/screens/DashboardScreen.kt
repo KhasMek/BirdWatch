@@ -1,5 +1,6 @@
 package com.khasmek.flockyou.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,24 +30,46 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.flockyou.ui.appViewModel
 import com.khasmek.flockyou.ui.components.DeviceCard
+import com.khasmek.flockyou.ui.components.ExportFormatDialog
 import com.khasmek.flockyou.ui.components.StatsBar
 import com.khasmek.flockyou.usb.UsbStatus
 import com.khasmek.flockyou.util.TimeFormat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardViewModel(it) }) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showExport by remember { mutableStateOf(false) }
+
+    if (showExport) {
+        ExportFormatDialog(
+            onDismiss = { showExport = false },
+            onExport = { format ->
+                showExport = false
+                scope.launch {
+                    val intent = viewModel.exportCurrentSession(format)
+                    if (intent == null) Toast.makeText(context, "No active session", Toast.LENGTH_SHORT).show()
+                    else context.startActivity(intent)
+                }
+            },
+        )
+    }
 
     // Ticks once a second so "12s ago" and the session duration stay fresh.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -72,6 +96,11 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                     }
                 },
                 actions = {
+                    if (state.isActive) {
+                        IconButton(onClick = { showExport = true }) {
+                            Icon(Icons.Default.Share, contentDescription = "Export this session")
+                        }
+                    }
                     if (state.usb.status == UsbStatus.DISCONNECTED || state.usb.status == UsbStatus.PERMISSION_NEEDED) {
                         IconButton(onClick = viewModel::connectUsb) {
                             Icon(Icons.Default.Usb, contentDescription = "Connect ESP32")

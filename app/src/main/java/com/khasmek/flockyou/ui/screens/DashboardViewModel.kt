@@ -1,8 +1,10 @@
 package com.khasmek.flockyou.ui.screens
 
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.flockyou.AppContainer
+import com.khasmek.flockyou.data.ExportFormat
 import com.khasmek.flockyou.data.ScanSession
 import com.khasmek.flockyou.detection.DetectedDevice
 import com.khasmek.flockyou.detection.DeviceType
@@ -74,6 +76,12 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
     fun toggleAudio() = container.settings.setAudioAlerts(!container.settings.audioAlerts.value)
 
     fun connectUsb() = container.usbCompanion.connect()
+
+    /** Export whatever the running session has persisted so far. Null when no session is active. */
+    suspend fun exportCurrentSession(format: ExportFormat): Intent? {
+        val id = sessionManager.currentSession.value?.id ?: return null
+        return container.exportManager.export(id, format)
+    }
 
     private data class RadioState(
         val scan: ScanStatus,

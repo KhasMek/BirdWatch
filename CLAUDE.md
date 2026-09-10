@@ -215,7 +215,13 @@ works without a key. Help link: https://developers.google.com/maps/documentation
    from EncryptedSharedPreferences. There is no SDK callback for a bad key (gray tiles only), so
    validation is a format check (39 chars, `AIza` prefix) plus visual confirmation. A changed key
    needs an app restart because the SDK caches the first key it reads.
-8. Export (JSON/CSV/KML via share sheet) + Sessions screen (list, detail, export, delete)
+8. Export (JSON/CSV/KML via share sheet) + Sessions screen (list, detail, export, delete) —
+   **done, device-verified**. `ExportWriter` is pure (JVM-tested); `ExportManager` writes to
+   `cache/exports/` behind a FileProvider and returns an ACTION_SEND chooser. Sessions list ->
+   `sessions/{sessionId}` detail route; active session cannot be deleted.
+
+All eight phases are complete. Remaining hardware validation: live ESP32 USB serial ingestion
+(Phase 4) once a flashed XIAO ESP32-S3 and OTG cable are available.
 
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest
 commit points and messages but never run git.

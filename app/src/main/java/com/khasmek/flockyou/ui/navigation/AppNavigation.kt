@@ -20,13 +20,16 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.khasmek.flockyou.ui.screens.DashboardScreen
 import com.khasmek.flockyou.ui.screens.MapScreen
 import com.khasmek.flockyou.ui.screens.PreviousSessionScreen
+import com.khasmek.flockyou.ui.screens.SessionDetailScreen
 import com.khasmek.flockyou.ui.screens.SettingsScreen
 
 /** The four top-level destinations shown in the bottom navigation bar. */
@@ -35,6 +38,11 @@ enum class AppTab(val route: String, val label: String, val icon: ImageVector) {
     Map("map", "Map", Icons.Default.Map),
     Sessions("sessions", "Sessions", Icons.Default.History),
     Settings("settings", "Settings", Icons.Default.Settings)
+}
+
+object Routes {
+    const val SESSION_DETAIL = "sessions/{sessionId}"
+    fun sessionDetail(sessionId: String) = "sessions/$sessionId"
 }
 
 @Composable
@@ -50,7 +58,11 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
         bottomBar = {
             NavigationBar {
                 AppTab.entries.forEach { tab ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
+                    // A tab is selected when the current route is the tab itself or nested under it
+                    // (e.g. sessions/{id} keeps the Sessions tab highlighted).
+                    val selected = currentDestination?.hierarchy?.any {
+                        it.route == tab.route || it.route?.startsWith(tab.route + "/") == true
+                    } == true
                     NavigationBarItem(
                         selected = selected,
                         onClick = { navController.navigateToTab(tab) },
@@ -72,7 +84,16 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
             composable(AppTab.Map.route) {
                 MapScreen(onOpenSettings = { navController.navigateToTab(AppTab.Settings) })
             }
-            composable(AppTab.Sessions.route) { PreviousSessionScreen() }
+            composable(AppTab.Sessions.route) {
+                PreviousSessionScreen(onOpenSession = { navController.navigate(Routes.sessionDetail(it)) })
+            }
+            composable(
+                route = Routes.SESSION_DETAIL,
+                arguments = listOf(navArgument("sessionId") { type = NavType.StringType }),
+            ) { entry ->
+                val id = entry.arguments?.getString("sessionId").orEmpty()
+                SessionDetailScreen(sessionId = id, onBack = { navController.popBackStack() })
+            }
             composable(AppTab.Settings.route) { SettingsScreen() }
         }
     }

@@ -5,6 +5,7 @@ import android.content.Context
 import com.khasmek.flockyou.audio.AlertSounds
 import com.khasmek.flockyou.data.AppSettings
 import com.khasmek.flockyou.data.DetectionDatabase
+import com.khasmek.flockyou.data.ExportManager
 import com.khasmek.flockyou.data.SecureSettings
 import com.khasmek.flockyou.data.SessionManager
 import com.khasmek.flockyou.detection.BleScanner
@@ -34,6 +35,7 @@ class AppContainer(context: Context) {
         SessionManager(appContext, database, bleScanner, usbCompanion, locationProvider, appScope)
     }
     val alertSounds: AlertSounds by lazy { AlertSounds(appContext, settings) }
+    val exportManager: ExportManager by lazy { ExportManager(appContext, database) }
 }
 
 class FlockYouApp : Application() {
