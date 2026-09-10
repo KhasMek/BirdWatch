@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -54,6 +55,10 @@ class SessionManager(
 
     private val mutex = Mutex()
     private var persistJob: Job? = null
+
+    /** First sighting of every MAC from any source. Drives audio alerts. */
+    val newDetections: Flow<DetectedDevice> =
+        merge(bleScanner.table.newDetections, usbCompanion.table.newDetections)
 
     init {
         // Any session left open by a crash/kill is closed now so it shows up in history.

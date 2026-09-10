@@ -203,7 +203,9 @@ works without a key. Help link: https://developers.google.com/maps/documentation
 3. Location provider, Room, SessionManager — **done, device-verified**
 4. USB serial ESP32 companion (attach/permission, CDC ACM reader, line parser, status in UI) —
    **code done, parser unit-tested; live serial test pending flashed XIAO + OTG cable**
-5. Dashboard UI: device cards with source badge + tier, stats bar, start/stop, audio alerts
+5. Dashboard UI: device cards with source badge + tier, stats bar, start/stop, audio alerts —
+   **done, device-verified** (MVVM: `DashboardViewModel` + `appViewModel {}` factory helper;
+   `AppSettings` holds audio/scan-mode toggles; `AlertSounds` synthesises WAVs into cache)
 6. Foreground service owning BLE + USB; live notification count; scan-mode switching
 7. Settings (API key, toggles) + Map screen with typed markers
 8. Export (JSON/CSV/KML via share sheet) + Sessions screen (list, detail, export, delete)

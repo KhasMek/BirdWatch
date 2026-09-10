@@ -2,7 +2,7 @@ package com.khasmek.flockyou.ui.screens
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,102 +10,165 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Usb
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.khasmek.flockyou.FlockYouApp
-import com.khasmek.flockyou.detection.Confidence
+import com.khasmek.flockyou.ui.appViewModel
+import com.khasmek.flockyou.ui.components.DeviceCard
+import com.khasmek.flockyou.ui.components.StatsBar
+import com.khasmek.flockyou.usb.UsbStatus
+import com.khasmek.flockyou.util.TimeFormat
+import kotlinx.coroutines.delay
 
-/**
- * TEMPORARY Phase 2/3 debug panel so the engine + persistence can be exercised on a device.
- * The device list here comes from Room (current session), not from the scanner's memory, so a
- * row appearing proves the whole pipeline. Replaced by the real dashboard in Phase 5.
- */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen() {
-    val container = FlockYouApp.instance.container
-    val scanner = container.bleScanner
-    val sessionManager = container.sessionManager
+fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardViewModel(it) }) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
 
-    val status by scanner.status.collectAsStateWithLifecycle()
-    val usb by container.usbCompanion.state.collectAsStateWithLifecycle()
-    val location by container.locationProvider.state.collectAsStateWithLifecycle()
-    val session by sessionManager.currentSession.collectAsStateWithLifecycle()
-    val devices by sessionManager.observeCurrentDevices().collectAsStateWithLifecycle(emptyList())
+    // Ticks once a second so "12s ago" and the session duration stay fresh.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.isActive) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1_000)
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text("Dashboard (Phase 3 debug)", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            text = session?.let { "Session ${it.id.take(8)}… · " } .orEmpty() +
-                if (status.isScanning) "Scanning · ${status.rawAdvertisements} adverts seen" else "Idle",
-            style = MaterialTheme.typography.bodyMedium
-        )
-        Text(
-            text = location.fix?.let { f ->
-                "GPS %.5f, %.5f (±%.0f m)".format(f.latitude, f.longitude, f.accuracyMeters ?: -1f)
-            } ?: if (location.isTracking) "GPS: waiting for fix…" else "GPS: off",
-            style = MaterialTheme.typography.bodySmall
-        )
-        status.error?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        status.warning?.let {
-            Text(it, color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall)
-        }
-        Text(
-            text = "USB: ${usb.status.label}" +
-                (usb.deviceDescription?.let { " · $it" } ?: "") +
-                (if (usb.isConnected) " · ${usb.linesReceived} lines, ${usb.detectionsReceived} hits" else ""),
-            style = MaterialTheme.typography.bodySmall
-        )
-        usb.error?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
-        usb.lastText?.let {
-            Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { if (session != null) sessionManager.stop() else sessionManager.start() }) {
-                Text(if (session != null) "Stop session" else "Start session")
-            }
-            OutlinedButton(onClick = { container.usbCompanion.connect() }) { Text("Connect USB") }
-        }
-        Spacer(Modifier.height(12.dp))
-        Text("Persisted this session: ${devices.size}", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(4.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(devices, key = { it.macAddress }) { d ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text("${d.deviceType.label} · ${d.displayName}", style = MaterialTheme.typography.titleSmall)
-                        Text("${d.macAddress} · ${d.source.label}", style = MaterialTheme.typography.bodySmall)
-                        Text(
-                            "${d.detectionMethod.label} (${d.matchedOn})" +
-                                (if (d.confidence == Confidence.LOW) " · low confidence" else "") +
-                                (d.ravenFirmware?.let { " · fw $it" } ?: ""),
-                            style = MaterialTheme.typography.bodySmall
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Flock You")
+                        state.session?.let {
+                            Text(
+                                text = "Session ${TimeFormat.duration(it.durationMillis(now))}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    if (state.usb.status == UsbStatus.DISCONNECTED || state.usb.status == UsbStatus.PERMISSION_NEEDED) {
+                        IconButton(onClick = viewModel::connectUsb) {
+                            Icon(Icons.Default.Usb, contentDescription = "Connect ESP32")
+                        }
+                    }
+                    IconButton(onClick = viewModel::toggleAudio) {
+                        Icon(
+                            imageVector = if (state.audioEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
+                            contentDescription = if (state.audioEnabled) "Mute alerts" else "Unmute alerts",
                         )
+                    }
+                },
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = viewModel::toggleSession,
+                icon = {
+                    Icon(
+                        imageVector = if (state.isActive) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                    )
+                },
+                text = { Text(if (state.isActive) "Stop scan" else "Start scan") },
+                containerColor = if (state.isActive) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.primaryContainer,
+            )
+        },
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
+            StatsBar(
+                total = state.totalCount,
+                flock = state.flockCount,
+                raven = state.ravenCount,
+                isScanning = state.scan.isScanning,
+                rawAdvertisements = state.scan.rawAdvertisements,
+                gpsLocked = state.gpsLocked,
+                gpsTracking = state.location.isTracking,
+                gpsAccuracyMeters = state.location.fix?.accuracyMeters,
+                usbStatus = state.usb.status,
+            )
+
+            if (state.messages.isNotEmpty()) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    state.messages.forEach { m ->
                         Text(
-                            "RSSI ${d.rssi} dBm · seen ${d.sightings}x" +
-                                (if (d.hasLocation) " · %.5f, %.5f".format(d.latitude, d.longitude) else " · no GPS"),
-                            style = MaterialTheme.typography.bodySmall
+                            text = m.text,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (m.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
                         )
                     }
                 }
             }
+
+            if (state.devices.isEmpty()) {
+                EmptyState(isActive = state.isActive, usbConnected = state.usb.isConnected)
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(state.devices, key = { it.macAddress }) { device ->
+                        DeviceCard(device = device, now = now)
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun EmptyState(isActive: Boolean, usbConnected: Boolean) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = if (isActive) "Listening…" else "Ready",
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = when {
+                !isActive -> "Press Start scan to begin a session. Detections are GPS-tagged and saved automatically."
+                usbConnected -> "Phone BLE and the ESP32 are both scanning. Flock cameras and Ravens will appear here."
+                else -> "Phone BLE is scanning for Ravens. Plug in the ESP32 over USB to detect Flock cameras."
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
     }
 }

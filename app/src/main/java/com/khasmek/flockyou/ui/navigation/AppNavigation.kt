@@ -1,5 +1,6 @@
 package com.khasmek.flockyou.ui.navigation
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -43,6 +44,9 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        // Each screen owns its top app bar and therefore the status-bar inset; the bottom bar
+        // handles the navigation-bar inset itself. Consuming nothing here avoids a double gap.
+        contentWindowInsets = WindowInsets(0),
         bottomBar = {
             NavigationBar {
                 AppTab.entries.forEach { tab ->

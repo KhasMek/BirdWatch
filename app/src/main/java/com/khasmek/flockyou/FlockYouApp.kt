@@ -2,6 +2,8 @@ package com.khasmek.flockyou
 
 import android.app.Application
 import android.content.Context
+import com.khasmek.flockyou.audio.AlertSounds
+import com.khasmek.flockyou.data.AppSettings
 import com.khasmek.flockyou.data.DetectionDatabase
 import com.khasmek.flockyou.data.SessionManager
 import com.khasmek.flockyou.detection.BleScanner
@@ -21,6 +23,7 @@ class AppContainer(context: Context) {
     /** Process-wide scope for background work that outlives any screen (persistence, radios). */
     val appScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    val settings: AppSettings by lazy { AppSettings(appContext) }
     val database: DetectionDatabase by lazy { DetectionDatabase.build(appContext) }
     val bleScanner: BleScanner by lazy { BleScanner(appContext) }
     val usbCompanion: UsbCompanion by lazy { UsbCompanion(appContext, appScope) }
@@ -28,6 +31,7 @@ class AppContainer(context: Context) {
     val sessionManager: SessionManager by lazy {
         SessionManager(database, bleScanner, usbCompanion, locationProvider, appScope)
     }
+    val alertSounds: AlertSounds by lazy { AlertSounds(appContext, settings) }
 }
 
 class FlockYouApp : Application() {
@@ -39,6 +43,8 @@ class FlockYouApp : Application() {
         super.onCreate()
         instance = this
         container = AppContainer(this)
+        // Audio alerts follow every session regardless of which screen is open.
+        container.alertSounds.start(container.sessionManager.newDetections, container.appScope)
     }
 
     companion object {
