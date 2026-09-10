@@ -28,9 +28,11 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
-    <!-- Foreground service for continuous background scanning. -->
+    <!-- Foreground service for continuous background scanning. The `location` type is what lets
+         the fused provider keep delivering GPS fixes while the app UI is in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -62,6 +64,11 @@
                 android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
                 android:resource="@xml/usb_device_filter" />
         </activity>
+
+        <service
+            android:name=".detection.ScanForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice|location" />
     </application>
 
 </manifest>

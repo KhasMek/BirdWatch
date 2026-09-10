@@ -1,11 +1,13 @@
 package com.khasmek.flockyou.data
 
 import android.bluetooth.le.ScanSettings
+import android.content.Context
 import android.util.Log
 import androidx.room.withTransaction
 import com.khasmek.flockyou.detection.BleScanner
 import com.khasmek.flockyou.detection.DetectedDevice
 import com.khasmek.flockyou.detection.DetectionTable
+import com.khasmek.flockyou.detection.ScanForegroundService
 import com.khasmek.flockyou.location.LocationProvider
 import com.khasmek.flockyou.usb.UsbCompanion
 import kotlinx.coroutines.CoroutineScope
@@ -40,12 +42,14 @@ import java.util.UUID
  *    [RESIGHT_FLUSH_MS] via `sample` so a chatty beacon does not hammer the database.
  */
 class SessionManager(
+    context: Context,
     private val db: DetectionDatabase,
     private val bleScanner: BleScanner,
     private val usbCompanion: UsbCompanion,
     private val locationProvider: LocationProvider,
     private val scope: CoroutineScope,
 ) {
+    private val appContext = context.applicationContext
     private val detectionDao get() = db.detectionDao()
     private val sessionDao get() = db.sessionDao()
 
@@ -65,12 +69,22 @@ class SessionManager(
         scope.launch { sessionDao.closeOpenSessions(System.currentTimeMillis()) }
     }
 
-    /** Start a new session and all detection sources. No-op if one is already running. */
+    /**
+     * Start a session from the UI. Goes through [ScanForegroundService] so the session survives
+     * backgrounding; if Android refuses to start a foreground service (app not visible), the
+     * session still starts in-process so nothing is silently lost.
+     */
     fun start(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY) {
-        scope.launch { startSuspending(scanMode) }
+        if (isActive) return
+        try {
+            ScanForegroundService.start(appContext, scanMode)
+        } catch (e: Exception) {
+            Log.w(TAG, "Foreground service start refused; running session in-process", e)
+            scope.launch { startSuspending(scanMode) }
+        }
     }
 
-    /** Stop the radios, flush, and close the session. No-op if none is running. */
+    /** Stop the radios, flush, and close the session. The service observes this and stops itself. */
     fun stop() {
         scope.launch { stopSuspending() }
     }

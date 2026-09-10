@@ -206,7 +206,10 @@ works without a key. Help link: https://developers.google.com/maps/documentation
 5. Dashboard UI: device cards with source badge + tier, stats bar, start/stop, audio alerts —
    **done, device-verified** (MVVM: `DashboardViewModel` + `appViewModel {}` factory helper;
    `AppSettings` holds audio/scan-mode toggles; `AlertSounds` synthesises WAVs into cache)
-6. Foreground service owning BLE + USB; live notification count; scan-mode switching
+6. Foreground service (`connectedDevice|location`); live notification count; LOW_POWER when the
+   app UI is backgrounded — **done, device-verified**. `SessionManager.start()` routes through
+   `ScanForegroundService.start()`; the service observes `currentSession` and stops itself when
+   it becomes null, so every stop path (FAB, notification action, programmatic) converges.
 7. Settings (API key, toggles) + Map screen with typed markers
 8. Export (JSON/CSV/KML via share sheet) + Sessions screen (list, detail, export, delete)
 

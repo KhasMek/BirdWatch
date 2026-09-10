@@ -29,7 +29,7 @@ class AppContainer(context: Context) {
     val usbCompanion: UsbCompanion by lazy { UsbCompanion(appContext, appScope) }
     val locationProvider: LocationProvider by lazy { LocationProvider(appContext) }
     val sessionManager: SessionManager by lazy {
-        SessionManager(database, bleScanner, usbCompanion, locationProvider, appScope)
+        SessionManager(appContext, database, bleScanner, usbCompanion, locationProvider, appScope)
     }
     val alertSounds: AlertSounds by lazy { AlertSounds(appContext, settings) }
 }
