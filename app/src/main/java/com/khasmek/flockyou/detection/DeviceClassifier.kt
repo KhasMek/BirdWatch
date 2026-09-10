@@ -19,14 +19,34 @@ data class BleAdvertisement(
     val serviceUuids: List<String> = emptyList(),
 )
 
-/** Which heuristic fired. `wireName` matches the firmware's `detection_method` JSON strings. */
+/**
+ * Which heuristic fired. `wireName` matches the firmware's `detection_method` JSON strings, for
+ * both the BLE-era firmware (first six) and the current WiFi promiscuous firmware (last six,
+ * received over USB serial from the ESP32 companion in Phase 4).
+ */
 enum class DetectionMethod(val wireName: String, val label: String) {
+    // Phone BLE (ported from BLE-era firmware)
     MAC_PREFIX("mac_prefix", "MAC OUI"),
     MAC_PREFIX_SOUNDTHINKING("mac_prefix_soundthinking", "SoundThinking OUI"),
     MAC_PREFIX_MFR("mac_prefix_mfr", "Contract-mfr OUI"),
     DEVICE_NAME("device_name", "BLE name"),
     BLE_MFR_ID("ble_mfr_id", "Mfr ID 0x09C8"),
     RAVEN_UUID("raven_uuid", "Raven UUID"),
+
+    // ESP32 WiFi promiscuous firmware, by confidence tier (4 = highest)
+    WIFI_WILDCARD_PROBE_IE_SIG("wifi_wildcard_probe_ie_sig", "Probe + IE fingerprint"),
+    WIFI_WILDCARD_PROBE("wifi_wildcard_probe", "Wildcard probe"),
+    WIFI_OUI_ADDR2("wifi_oui_addr2", "WiFi OUI (transmitter)"),
+    WIFI_OUI_ADDR1("wifi_oui_addr1", "WiFi OUI (receiver echo)"),
+    WIFI_OUI_ADDR3("wifi_oui_addr3", "WiFi OUI (BSSID echo)"),
+    WIFI_SSID("wifi_ssid", "SSID keyword"),
+    /** Anything the firmware emits that this app does not know yet. */
+    UNKNOWN("unknown", "Unknown");
+
+    companion object {
+        fun fromWireName(name: String?): DetectionMethod =
+            entries.firstOrNull { it.wireName.equals(name, ignoreCase = true) } ?: UNKNOWN
+    }
 }
 
 enum class DeviceType(val label: String) {

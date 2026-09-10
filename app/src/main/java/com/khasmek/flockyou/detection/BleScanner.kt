@@ -12,6 +12,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.util.Log
 import androidx.core.location.LocationManagerCompat
+import com.khasmek.flockyou.location.GeoFix
 import com.khasmek.flockyou.util.Permissions
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,11 +63,11 @@ class BleScanner(context: Context) {
     /** Emits once per MAC the first time it is matched. Drives audio alerts. */
     val newDetections: SharedFlow<DetectedDevice> = _newDetections.asSharedFlow()
 
-    /** Optional hook for Phase 3: returns the current (lat, lng) to stamp on detections. */
+    /** Set by SessionManager: returns the current GPS fix to stamp on detections, or null. */
     @Volatile
-    var locationSource: (() -> Pair<Double, Double>?)? = null
+    var locationSource: (() -> GeoFix?)? = null
 
-    /** Optional hook for Phase 3: the active session id stamped on new detections. */
+    /** Set by SessionManager: the active session id stamped on new detections. */
     @Volatile
     var sessionId: String = ""
 
@@ -214,7 +215,7 @@ class BleScanner(context: Context) {
         val adv = result.toAdvertisement() ?: return
         val classification = DeviceClassifier.classify(adv) ?: return
         val now = System.currentTimeMillis()
-        val location = locationSource?.invoke()
+        val fix = locationSource?.invoke()
 
         var isNew = false
         val updated: DetectedDevice
@@ -223,7 +224,9 @@ class BleScanner(context: Context) {
             updated = if (existing == null) {
                 isNew = true
                 DetectedDevice(
+                    sessionId = sessionId,
                     macAddress = adv.macAddress,
+                    source = DetectionSource.BLE,
                     deviceName = adv.deviceName,
                     detectionMethod = classification.method,
                     deviceType = classification.deviceType,
@@ -231,12 +234,12 @@ class BleScanner(context: Context) {
                     matchedOn = classification.matchedOn,
                     ravenFirmware = classification.ravenFirmware,
                     rssi = result.rssi,
-                    latitude = location?.first,
-                    longitude = location?.second,
+                    latitude = fix?.latitude,
+                    longitude = fix?.longitude,
+                    accuracyMeters = fix?.accuracyMeters,
                     firstSeen = now,
                     lastSeen = now,
                     sightings = 1,
-                    sessionId = sessionId,
                 )
             } else {
                 existing.copy(
@@ -246,8 +249,9 @@ class BleScanner(context: Context) {
                     lastSeen = now,
                     sightings = existing.sightings + 1,
                     // Refresh GPS on every re-sighting so movement is captured.
-                    latitude = location?.first ?: existing.latitude,
-                    longitude = location?.second ?: existing.longitude,
+                    latitude = fix?.latitude ?: existing.latitude,
+                    longitude = fix?.longitude ?: existing.longitude,
+                    accuracyMeters = if (fix != null) fix.accuracyMeters else existing.accuracyMeters,
                 )
             }
             byMac[adv.macAddress] = updated
