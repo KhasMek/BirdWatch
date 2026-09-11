@@ -44,6 +44,7 @@ class ExportWriterTest {
         assertEquals("wifi_wildcard_probe_ie_sig", d0["detection_method"]!!.jsonPrimitive.content)
         assertEquals("4", d0["detection_tier"]!!.jsonPrimitive.content)
         assertEquals("ESP32_WIFI", d0["source"]!!.jsonPrimitive.content)
+        assertEquals("FLOCK_ALPR", d0["category"]!!.jsonPrimitive.content)
         assertEquals("null", d0["device_name"].toString())
         val d1 = devices[1].jsonObject
         assertEquals("1.3.x", d1["raven_fw"]!!.jsonPrimitive.content)
@@ -56,7 +57,7 @@ class ExportWriterTest {
         assertEquals(3, lines.size)
         assertEquals(ExportWriter.CSV_HEADER.joinToString(","), lines[0])
         assertTrue(lines[1].contains(",37.123457,-122.987654,4.6,"))
-        assertTrue(lines[1].contains(",wifi_wildcard_probe_ie_sig,FLOCK,HIGH,82:6b:f2,,4,6,-52,"))
+        assertTrue(lines[1].contains(",wifi_wildcard_probe_ie_sig,FLOCK,FLOCK_ALPR,HIGH,82:6b:f2,,4,6,-52,"))
         // Name with a comma and quotes is quoted with doubled quotes.
         assertTrue(lines[2].contains("\"Raven, \"\"unit 7\"\"\""))
         assertEquals(ExportWriter.CSV_HEADER.size, splitCsv(lines[2]).size)

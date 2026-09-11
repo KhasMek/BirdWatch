@@ -14,6 +14,7 @@ import com.khasmek.flockyou.usb.UsbCompanion
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Manual dependency container. Singletons are created lazily on first use so that nothing
@@ -49,6 +50,10 @@ class FlockYouApp : Application() {
         container = AppContainer(this)
         // Audio alerts follow every session regardless of which screen is open.
         container.alertSounds.start(container.sessionManager.newDetections, container.appScope)
+        // Signature-pack toggles apply to the scanner immediately, mid-session included.
+        container.appScope.launch {
+            container.settings.enabledPacks.collect { container.bleScanner.enabledPacks = it }
+        }
     }
 
     companion object {

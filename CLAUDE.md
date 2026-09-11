@@ -226,6 +226,19 @@ works without a key. Help link: https://developers.google.com/maps/documentation
 All eight phases are complete. Remaining hardware validation: live ESP32 USB serial ingestion
 (Phase 4) once a flashed XIAO ESP32-S3 and OTG cable are available.
 
+9. **Signature packs**: opt-in detection categories beyond Flock/Raven. The full registry,
+   confidence rules, exclusions, and attribution live in `docs/SIGNATURES.md`; read it before
+   touching anything in `detection/`. Every signature in code cites a source id from that file
+   (`Sources` in `SignaturePacks.kt` mirrors its table and feeds the in-app credits).
+   - 9a — **done**: `SignaturePacks.kt` (typed signatures: OUI / company ID / 16-bit service
+     UUID / name substring / composite), `DeviceClassifier.classify(adv, enabledPacks)` runs Core
+     first then enabled packs; `DeviceType` gained a `category`; Settings has per-pack switches
+     with a BETA tag and an About & credits list; stats/sessions show an "Other" count; exports
+     carry `category`. Ships Axon (LE pack) and Meta glasses (wearables pack) on phone BLE.
+   - 9b — planned: phone WiFi AP scan source for WiFi-only OUIs (WatchGuard, Digital Ally,
+     Utility; DJI, Parrot, Skydio).
+   - 9c — stretch: BLE Remote ID (ASTM F3411) decoding.
+
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest
 commit points and messages but never run git.
 

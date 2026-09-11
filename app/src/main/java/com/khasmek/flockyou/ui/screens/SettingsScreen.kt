@@ -3,6 +3,8 @@ package com.khasmek.flockyou.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,9 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -50,7 +54,10 @@ import com.khasmek.flockyou.ui.appViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = appViewModel { SettingsViewModel(it) }) {
+fun SettingsScreen(
+    onOpenAbout: () -> Unit,
+    viewModel: SettingsViewModel = appViewModel { SettingsViewModel(it) },
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
@@ -162,6 +169,51 @@ fun SettingsScreen(viewModel: SettingsViewModel = appViewModel { SettingsViewMod
                 checked = state.lowPowerScan,
                 onCheckedChange = viewModel::setLowPowerScan,
             )
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
+            SectionTitle("Detection packs")
+            Text(
+                "Flock cameras and Raven gunshot detectors are always on. These optional packs add other " +
+                    "hardware over the phone's Bluetooth. Their hits are counted under \"Other\", never as Flock or Raven.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            state.packs.forEach { pack ->
+                ToggleRow(
+                    title = pack.name,
+                    subtitle = pack.description + (pack.caution?.let { "\n$it" } ?: ""),
+                    checked = pack.id in state.enabledPacks,
+                    onCheckedChange = { viewModel.setPackEnabled(pack.id, it) },
+                    tag = if (pack.beta) "BETA" else null,
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAbout)
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("About & credits", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "Where the detection signatures come from",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -173,7 +225,13 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    tag: String? = null,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -181,7 +239,20 @@ private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onCheck
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                if (tag != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = tag,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier = Modifier
+                            .background(MaterialTheme.colorScheme.tertiaryContainer, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))

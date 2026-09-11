@@ -25,4 +25,7 @@ data class SessionSummary(
     val deviceCount: Int,
     val flockCount: Int,
     val ravenCount: Int,
-)
+) {
+    /** Hits from opt-in signature packs (law enforcement, wearables, ...). */
+    val otherCount: Int get() = deviceCount - flockCount - ravenCount
+}

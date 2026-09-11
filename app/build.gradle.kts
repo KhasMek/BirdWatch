@@ -35,6 +35,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true // BuildConfig.VERSION_NAME on the About screen
     }
 }
 

@@ -26,6 +26,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.khasmek.flockyou.ui.screens.AboutScreen
 import com.khasmek.flockyou.ui.screens.DashboardScreen
 import com.khasmek.flockyou.ui.screens.MapScreen
 import com.khasmek.flockyou.ui.screens.PreviousSessionScreen
@@ -43,6 +44,7 @@ enum class AppTab(val route: String, val label: String, val icon: ImageVector) {
 object Routes {
     const val SESSION_DETAIL = "sessions/{sessionId}"
     fun sessionDetail(sessionId: String) = "sessions/$sessionId"
+    const val ABOUT = "settings/about"
 }
 
 @Composable
@@ -94,7 +96,10 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
                 val id = entry.arguments?.getString("sessionId").orEmpty()
                 SessionDetailScreen(sessionId = id, onBack = { navController.popBackStack() })
             }
-            composable(AppTab.Settings.route) { SettingsScreen() }
+            composable(AppTab.Settings.route) {
+                SettingsScreen(onOpenAbout = { navController.navigate(Routes.ABOUT) })
+            }
+            composable(Routes.ABOUT) { AboutScreen(onBack = { navController.popBackStack() }) }
         }
     }
 }

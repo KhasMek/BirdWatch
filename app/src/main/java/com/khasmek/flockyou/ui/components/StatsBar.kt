@@ -10,14 +10,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.GpsNotFixed
 import androidx.compose.material.icons.filled.GpsOff
-import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
-import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,17 +28,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.khasmek.flockyou.detection.DeviceCategory
 import com.khasmek.flockyou.ui.theme.DetectionColors
 import com.khasmek.flockyou.usb.UsbStatus
 
 /**
- * Two rows: counts (total / Flock / Raven) and radio status (scan / GPS / USB).
+ * Two rows: counts (total / Flock / Raven, plus "Other" when opt-in packs are in play) and
+ * radio status (scan / GPS / USB).
  */
 @Composable
 fun StatsBar(
     total: Int,
     flock: Int,
     raven: Int,
+    other: Int,
+    showOther: Boolean,
     isScanning: Boolean,
     rawAdvertisements: Long,
     gpsLocked: Boolean,
@@ -59,8 +62,11 @@ fun StatsBar(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 CountStat("Devices", total, MaterialTheme.colorScheme.onSurface)
-                CountStat("Flock", flock, DetectionColors.Flock, Icons.Default.Videocam)
-                CountStat("Raven", raven, DetectionColors.Raven, Icons.Default.Hearing)
+                CountStat("Flock", flock, DetectionColors.Flock, categoryIcon(DeviceCategory.FLOCK_ALPR))
+                CountStat("Raven", raven, DetectionColors.Raven, categoryIcon(DeviceCategory.GUNSHOT_DETECTOR))
+                if (showOther) {
+                    CountStat("Other", other, DetectionColors.LawEnforcement, Icons.Default.Category)
+                }
             }
             Spacer(Modifier.height(10.dp))
             Row(

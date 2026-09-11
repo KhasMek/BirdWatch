@@ -46,7 +46,7 @@ import com.google.maps.android.compose.MarkerInfoWindowContent
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.khasmek.flockyou.detection.DetectedDevice
-import com.khasmek.flockyou.detection.DeviceType
+import com.khasmek.flockyou.detection.DeviceCategory
 import com.khasmek.flockyou.ui.appViewModel
 import com.khasmek.flockyou.util.Permissions
 import com.khasmek.flockyou.util.TimeFormat
@@ -155,10 +155,12 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
 private fun DeviceMarker(device: DetectedDevice) {
     val position = LatLng(device.latitude!!, device.longitude!!)
     val markerState = remember(device.macAddress, position) { MarkerState(position) }
-    val hue = when (device.deviceType) {
-        DeviceType.FLOCK -> BitmapDescriptorFactory.HUE_ORANGE
-        DeviceType.RAVEN -> BitmapDescriptorFactory.HUE_VIOLET
-        DeviceType.SOUNDTHINKING -> BitmapDescriptorFactory.HUE_MAGENTA
+    val hue = when (device.deviceType.category) {
+        DeviceCategory.FLOCK_ALPR -> BitmapDescriptorFactory.HUE_ORANGE
+        DeviceCategory.GUNSHOT_DETECTOR -> BitmapDescriptorFactory.HUE_VIOLET
+        DeviceCategory.LAW_ENFORCEMENT -> BitmapDescriptorFactory.HUE_AZURE
+        DeviceCategory.WEARABLE_CAMERA -> BitmapDescriptorFactory.HUE_CYAN
+        DeviceCategory.DRONE -> BitmapDescriptorFactory.HUE_YELLOW
     }
     val icon = remember(hue) { BitmapDescriptorFactory.defaultMarker(hue) }
 

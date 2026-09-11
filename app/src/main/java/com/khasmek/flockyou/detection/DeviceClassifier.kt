@@ -33,6 +33,11 @@ enum class DetectionMethod(val wireName: String, val label: String) {
     BLE_MFR_ID("ble_mfr_id", "Mfr ID 0x09C8"),
     RAVEN_UUID("raven_uuid", "Raven UUID"),
 
+    // Phone BLE, signature packs (phase 9a)
+    BLE_COMPANY_ID("ble_company_id", "BLE company ID"),
+    BLE_SERVICE_UUID("ble_service_uuid", "BLE service UUID"),
+    BLE_COMPOSITE("ble_composite", "BLE company ID + service"),
+
     // ESP32 WiFi promiscuous firmware, by confidence tier (4 = highest)
     WIFI_WILDCARD_PROBE_IE_SIG("wifi_wildcard_probe_ie_sig", "Probe + IE fingerprint"),
     WIFI_WILDCARD_PROBE("wifi_wildcard_probe", "Wildcard probe"),
@@ -49,10 +54,27 @@ enum class DetectionMethod(val wireName: String, val label: String) {
     }
 }
 
-enum class DeviceType(val label: String) {
-    FLOCK("Flock"),
-    SOUNDTHINKING("SoundThinking"),
-    RAVEN("Raven"),
+/** What kind of thing was found. Drives counts, colours and export grouping. */
+enum class DeviceCategory(val label: String, val shortLabel: String) {
+    FLOCK_ALPR("Flock Safety camera", "Flock"),
+    GUNSHOT_DETECTOR("Gunshot detector", "Raven"),
+    LAW_ENFORCEMENT("Law-enforcement equipment", "LE"),
+    WEARABLE_CAMERA("Wearable camera", "Wearable"),
+    DRONE("Drone", "Drone"),
+}
+
+/**
+ * The vendor/product a hit is attributed to. Stored by name in Room, so values may be added
+ * but never renamed or removed.
+ */
+enum class DeviceType(val label: String, val category: DeviceCategory) {
+    FLOCK("Flock", DeviceCategory.FLOCK_ALPR),
+    SOUNDTHINKING("SoundThinking", DeviceCategory.GUNSHOT_DETECTOR),
+    RAVEN("Raven", DeviceCategory.GUNSHOT_DETECTOR),
+    AXON("Axon", DeviceCategory.LAW_ENFORCEMENT),
+    META_GLASSES("Meta glasses", DeviceCategory.WEARABLE_CAMERA);
+
+    val isCore: Boolean get() = category == DeviceCategory.FLOCK_ALPR || category == DeviceCategory.GUNSHOT_DETECTOR
 }
 
 enum class Confidence { HIGH, LOW }
@@ -62,6 +84,7 @@ enum class Confidence { HIGH, LOW }
  *
  * @param matchedOn     The concrete prefix / name pattern / company ID / UUID that triggered.
  * @param ravenFirmware "1.1.x", "1.2.x", "1.3.x" or "?" for Raven hits; null otherwise.
+ * @param pack          The opt-in pack that matched, or null for Core (Flock / Raven).
  */
 data class Classification(
     val method: DetectionMethod,
@@ -69,6 +92,7 @@ data class Classification(
     val confidence: Confidence,
     val matchedOn: String,
     val ravenFirmware: String? = null,
+    val pack: PackId? = null,
 )
 
 /**
@@ -82,14 +106,34 @@ data class Classification(
  *  5. BLE manufacturer company ID 0x09C8
  *  6. Raven service-UUID fingerprint, with firmware estimation
  *
+ * then, only if none of those matched, the enabled opt-in [SignaturePacks] in order.
  * The first rule that matches wins. No Android imports here on purpose.
  */
 object DeviceClassifier {
 
     private const val BLUETOOTH_BASE_SUFFIX = "-0000-1000-8000-00805f9b34fb"
 
-    /** Returns a [Classification] if the advertisement looks like a target device, else null. */
-    fun classify(adv: BleAdvertisement): Classification? {
+    /**
+     * Returns a [Classification] if the advertisement looks like a target device, else null.
+     * [enabledPacks] selects which opt-in packs are consulted after the Core heuristics.
+     */
+    fun classify(adv: BleAdvertisement, enabledPacks: Set<PackId> = emptySet()): Classification? {
+        classifyCore(adv)?.let { return it }
+        if (enabledPacks.isEmpty()) return null
+        val uuids = adv.serviceUuids.map(::normalizeUuid).toSet()
+        val prefix = macPrefix(adv.macAddress)
+        for (pack in SignaturePacks.OPTIONAL) {
+            if (pack.id !in enabledPacks) continue
+            for (sig in pack.signatures) {
+                val hit = match(sig, adv, prefix, uuids) ?: continue
+                return hit.copy(pack = pack.id)
+            }
+        }
+        return null
+    }
+
+    /** The original firmware's Flock + Raven heuristics only. */
+    fun classifyCore(adv: BleAdvertisement): Classification? {
         val prefix = macPrefix(adv.macAddress)
 
         // 1. Flock Safety direct OUIs
@@ -118,10 +162,7 @@ object DeviceClassifier {
 
         // 5. Manufacturer company ID
         adv.manufacturerIds.firstOrNull { it in DetectionSignatures.BLE_MANUFACTURER_IDS }?.let { id ->
-            return Classification(
-                DetectionMethod.BLE_MFR_ID, DeviceType.FLOCK, Confidence.HIGH,
-                "0x" + id.toString(16).uppercase(Locale.ROOT).padStart(4, '0')
-            )
+            return Classification(DetectionMethod.BLE_MFR_ID, DeviceType.FLOCK, Confidence.HIGH, hex16(id))
         }
 
         // 6. Raven service UUIDs
@@ -141,6 +182,21 @@ object DeviceClassifier {
         }
 
         return null
+    }
+
+    private fun match(sig: Signature, adv: BleAdvertisement, prefix: String, uuids: Set<String>): Classification? = when (sig) {
+        is Signature.Oui ->
+            if (prefix == sig.prefix) Classification(DetectionMethod.MAC_PREFIX, sig.vendor, sig.confidence, sig.prefix) else null
+        is Signature.CompanyId ->
+            if (sig.id in adv.manufacturerIds) Classification(DetectionMethod.BLE_COMPANY_ID, sig.vendor, sig.confidence, hex16(sig.id)) else null
+        is Signature.ServiceUuid16 ->
+            if (normalizeUuid(hex16(sig.uuid)) in uuids) Classification(DetectionMethod.BLE_SERVICE_UUID, sig.vendor, sig.confidence, hex16(sig.uuid)) else null
+        is Signature.NameSubstring ->
+            if (adv.deviceName?.contains(sig.pattern, ignoreCase = true) == true) Classification(DetectionMethod.DEVICE_NAME, sig.vendor, sig.confidence, sig.pattern) else null
+        is Signature.Composite ->
+            if (sig.companyId in adv.manufacturerIds && normalizeUuid(hex16(sig.serviceUuid16)) in uuids)
+                Classification(DetectionMethod.BLE_COMPOSITE, sig.vendor, sig.confidence, "${hex16(sig.companyId)}+${hex16(sig.serviceUuid16)}")
+            else null
     }
 
     /**
@@ -171,6 +227,9 @@ object DeviceClassifier {
         if (name.isNullOrEmpty()) return null
         return DetectionSignatures.DEVICE_NAME_PATTERNS.firstOrNull { name.contains(it, ignoreCase = true) }
     }
+
+    /** "0x09C8" style rendering of a 16-bit identifier. */
+    fun hex16(v: Int): String = "0x" + v.toString(16).uppercase(Locale.ROOT).padStart(4, '0')
 
     /**
      * Normalise any UUID spelling to lowercase 128-bit canonical form. Short 16-bit ("180a" or

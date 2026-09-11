@@ -1,7 +1,7 @@
 package com.khasmek.flockyou.data
 
 import com.khasmek.flockyou.detection.DetectedDevice
-import com.khasmek.flockyou.detection.DeviceType
+import com.khasmek.flockyou.detection.DeviceCategory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -56,6 +56,7 @@ object ExportWriter {
                         put("source", d.source.name)
                         put("detection_method", d.detectionMethod.wireName)
                         put("device_type", d.deviceType.name)
+                        put("category", d.deviceType.category.name)
                         put("confidence", d.confidence.name)
                         put("matched_on", d.matchedOn)
                         put("raven_fw", d.ravenFirmware?.let { JsonPrimitive(it) } ?: JsonNull)
@@ -76,7 +77,7 @@ object ExportWriter {
     }
 
     val CSV_HEADER = listOf(
-        "session_id", "mac_address", "device_name", "source", "detection_method", "device_type",
+        "session_id", "mac_address", "device_name", "source", "detection_method", "device_type", "category",
         "confidence", "matched_on", "raven_fw", "detection_tier", "channel", "rssi",
         "latitude", "longitude", "gps_accuracy_m", "first_seen", "last_seen", "sightings",
     )
@@ -87,7 +88,7 @@ object ExportWriter {
             appendLine(
                 listOf(
                     d.sessionId, d.macAddress, d.deviceName ?: "", d.source.name, d.detectionMethod.wireName,
-                    d.deviceType.name, d.confidence.name, d.matchedOn, d.ravenFirmware ?: "",
+                    d.deviceType.name, d.deviceType.category.name, d.confidence.name, d.matchedOn, d.ravenFirmware ?: "",
                     d.tier?.toString() ?: "", d.channel?.toString() ?: "", d.rssi.toString(),
                     d.latitude?.let { fmt(it) } ?: "", d.longitude?.let { fmt(it) } ?: "",
                     d.accuracyMeters?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "",
@@ -104,16 +105,15 @@ object ExportWriter {
         appendLine("<Document>")
         appendLine("  <name>${xml("Flock You Companion session " + isoCompact(session.startedAt))}</name>")
         appendLine("  <description>${xml("${devices.size} devices, ${located.size} with GPS. Session ${session.id}")}</description>")
-        appendLine("""  <Style id="flock"><IconStyle><color>ff0051e6</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/orange-circle.png</href></Icon></IconStyle></Style>""")
-        appendLine("""  <Style id="raven"><IconStyle><color>ff9a1b6a</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/purple-circle.png</href></Icon></IconStyle></Style>""")
+        KML_STYLES.forEach { (id, style) -> appendLine("  <Style id=\"$id\"><IconStyle><color>${style.first}</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/${style.second}.png</href></Icon></IconStyle></Style>") }
         located.forEach { d ->
-            val style = if (d.deviceType == DeviceType.FLOCK) "flock" else "raven"
             appendLine("  <Placemark>")
             appendLine("    <name>${xml("${d.deviceType.label}: ${d.displayName}")}</name>")
-            appendLine("    <styleUrl>#$style</styleUrl>")
+            appendLine("    <styleUrl>#${kmlStyleId(d.deviceType.category)}</styleUrl>")
             appendLine("    <TimeStamp><when>${iso(d.lastSeen)}</when></TimeStamp>")
             appendLine("    <description><![CDATA[")
             appendLine("      <b>MAC:</b> ${d.macAddress}<br/>")
+            appendLine("      <b>Category:</b> ${d.deviceType.category.label}<br/>")
             appendLine("      <b>Source:</b> ${d.source.label}<br/>")
             appendLine("      <b>Method:</b> ${d.detectionMethod.label} (${d.matchedOn})<br/>")
             appendLine("      <b>Confidence:</b> ${d.confidence.name}<br/>")
@@ -134,6 +134,23 @@ object ExportWriter {
     }
 
     // ------------------------------------------------------------------
+
+    /** KML style id -> (aabbggrr colour, Google paddle icon name). */
+    private val KML_STYLES: Map<String, Pair<String, String>> = mapOf(
+        "flock" to ("ff0051e6" to "orange-circle"),
+        "raven" to ("ff9a1b6a" to "purple-circle"),
+        "le" to ("ffc06515" to "blu-circle"),
+        "wearable" to ("ff7b8900" to "ltblu-circle"),
+        "drone" to ("ff7a6e54" to "ylw-circle"),
+    )
+
+    fun kmlStyleId(category: DeviceCategory): String = when (category) {
+        DeviceCategory.FLOCK_ALPR -> "flock"
+        DeviceCategory.GUNSHOT_DETECTOR -> "raven"
+        DeviceCategory.LAW_ENFORCEMENT -> "le"
+        DeviceCategory.WEARABLE_CAMERA -> "wearable"
+        DeviceCategory.DRONE -> "drone"
+    }
 
     fun iso(epochMs: Long): String = Instant.ofEpochMilli(epochMs).toString()
 

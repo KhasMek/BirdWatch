@@ -66,6 +66,10 @@ class BleScanner(context: Context) {
     @Volatile
     var sessionId: String = ""
 
+    /** Opt-in signature packs to consult after the Core heuristics. Mirrors AppSettings.enabledPacks. */
+    @Volatile
+    var enabledPacks: Set<PackId> = emptySet()
+
     private val rawLock = Any()
     private var rawCount = 0L
     private var lastRawPublish = 0L
@@ -206,7 +210,7 @@ class BleScanner(context: Context) {
         publishRawCount()
 
         val adv = result.toAdvertisement() ?: return
-        val classification = DeviceClassifier.classify(adv) ?: return
+        val classification = DeviceClassifier.classify(adv, enabledPacks) ?: return
         val now = System.currentTimeMillis()
         val fix = locationSource?.invoke()
         val mac = DetectionTable.normalizeMac(adv.macAddress)

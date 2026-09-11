@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.MoreVert
@@ -172,6 +173,12 @@ private fun SessionRow(
                     Icon(Icons.Default.Hearing, null, tint = DetectionColors.Raven, modifier = Modifier.height(16.dp))
                     Spacer(Modifier.width(3.dp))
                     Text("${summary.ravenCount}", style = MaterialTheme.typography.bodyMedium, color = DetectionColors.Raven)
+                    if (summary.otherCount > 0) {
+                        Spacer(Modifier.width(10.dp))
+                        Icon(Icons.Default.Category, null, tint = DetectionColors.LawEnforcement, modifier = Modifier.height(16.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("${summary.otherCount}", style = MaterialTheme.typography.bodyMedium, color = DetectionColors.LawEnforcement)
+                    }
                 }
             }
             IconButton(onClick = { menu = true }) {

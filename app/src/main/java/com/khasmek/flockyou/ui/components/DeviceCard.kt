@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.material.icons.filled.LocalPolice
+import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.SignalCellularAlt1Bar
 import androidx.compose.material.icons.filled.SignalCellularAlt2Bar
@@ -35,12 +38,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.khasmek.flockyou.detection.Confidence
 import com.khasmek.flockyou.detection.DetectedDevice
 import com.khasmek.flockyou.detection.DetectionSource
+import com.khasmek.flockyou.detection.DeviceCategory
 import com.khasmek.flockyou.detection.DeviceType
 import com.khasmek.flockyou.ui.theme.DetectionColors
 import com.khasmek.flockyou.util.TimeFormat
@@ -125,12 +130,18 @@ fun DeviceCard(device: DetectedDevice, now: Long, modifier: Modifier = Modifier)
     }
 }
 
+/** Icon per category, shared with the stats bar and session rows. */
+fun categoryIcon(category: DeviceCategory): ImageVector = when (category) {
+    DeviceCategory.FLOCK_ALPR -> Icons.Default.Videocam
+    DeviceCategory.GUNSHOT_DETECTOR -> Icons.Default.Hearing
+    DeviceCategory.LAW_ENFORCEMENT -> Icons.Default.LocalPolice
+    DeviceCategory.WEARABLE_CAMERA -> Icons.Default.RemoveRedEye
+    DeviceCategory.DRONE -> Icons.Default.Flight
+}
+
 @Composable
 private fun TypeBadge(type: DeviceType, color: Color) {
-    val icon = when (type) {
-        DeviceType.FLOCK -> Icons.Default.Videocam
-        DeviceType.RAVEN, DeviceType.SOUNDTHINKING -> Icons.Default.Hearing
-    }
+    val icon = categoryIcon(type.category)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier

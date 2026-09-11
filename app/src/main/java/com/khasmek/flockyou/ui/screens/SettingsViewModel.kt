@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.flockyou.AppContainer
 import com.khasmek.flockyou.data.SecureSettings
+import com.khasmek.flockyou.detection.PackId
+import com.khasmek.flockyou.detection.SignaturePack
+import com.khasmek.flockyou.detection.SignaturePacks
 import com.khasmek.flockyou.util.MapsKeyInjector
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,9 +22,11 @@ data class SettingsUiState(
     val lowPowerScan: Boolean = false,
     /** A different key is already in use by the Maps SDK; the new one applies after restart. */
     val restartRequired: Boolean = false,
+    val enabledPacks: Set<PackId> = emptySet(),
 ) {
     val hasKey: Boolean get() = !mapsApiKey.isNullOrBlank()
     val keyHint: String? get() = mapsApiKey?.let { "…" + it.takeLast(4) }
+    val packs: List<SignaturePack> get() = SignaturePacks.OPTIONAL
 }
 
 sealed interface SaveResult {
@@ -40,13 +45,15 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         secure.mapsApiKey,
         settings.audioAlerts,
         settings.lowPowerScan,
-    ) { loaded, key, audio, lowPower ->
+        settings.enabledPacks,
+    ) { loaded, key, audio, lowPower, packs ->
         SettingsUiState(
             loaded = loaded,
             mapsApiKey = key,
             audioAlerts = audio,
             lowPowerScan = lowPower,
             restartRequired = key != null && MapsKeyInjector.needsRestartFor(key),
+            enabledPacks = packs,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -70,6 +77,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAudioAlerts(enabled: Boolean) = settings.setAudioAlerts(enabled)
     fun setLowPowerScan(enabled: Boolean) = settings.setLowPowerScan(enabled)
+    fun setPackEnabled(pack: PackId, enabled: Boolean) = settings.setPackEnabled(pack, enabled)
     fun playTestChirp() = container.alertSounds.playTest()
 
     companion object {

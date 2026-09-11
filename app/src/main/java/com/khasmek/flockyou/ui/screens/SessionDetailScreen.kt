@@ -128,6 +128,7 @@ fun SessionDetailScreen(
                         Stat("Devices", summary.deviceCount.toString())
                         Stat("Flock", summary.flockCount.toString())
                         Stat("Raven", summary.ravenCount.toString())
+                        if (summary.otherCount > 0) Stat("Other", summary.otherCount.toString())
                         Stat("With GPS", state.devices.count { it.hasLocation }.toString())
                     }
                 }

@@ -7,7 +7,8 @@ import com.khasmek.flockyou.AppContainer
 import com.khasmek.flockyou.data.ExportFormat
 import com.khasmek.flockyou.data.ScanSession
 import com.khasmek.flockyou.detection.DetectedDevice
-import com.khasmek.flockyou.detection.DeviceType
+import com.khasmek.flockyou.detection.DeviceCategory
+import com.khasmek.flockyou.detection.PackId
 import com.khasmek.flockyou.detection.ScanStatus
 import com.khasmek.flockyou.location.LocationState
 import com.khasmek.flockyou.usb.UsbState
@@ -26,11 +27,15 @@ data class DashboardUiState(
     val usb: UsbState = UsbState(),
     val location: LocationState = LocationState(),
     val audioEnabled: Boolean = true,
+    val enabledPacks: Set<PackId> = emptySet(),
 ) {
     val isActive: Boolean get() = session != null
     val totalCount: Int get() = devices.size
-    val flockCount: Int get() = devices.count { it.deviceType == DeviceType.FLOCK }
-    val ravenCount: Int get() = devices.count { it.deviceType == DeviceType.RAVEN || it.deviceType == DeviceType.SOUNDTHINKING }
+    val flockCount: Int get() = devices.count { it.deviceType.category == DeviceCategory.FLOCK_ALPR }
+    val ravenCount: Int get() = devices.count { it.deviceType.category == DeviceCategory.GUNSHOT_DETECTOR }
+    /** Hits from opt-in packs (law enforcement, wearables, ...). Never mixed into Flock/Raven. */
+    val otherCount: Int get() = totalCount - flockCount - ravenCount
+    val showOther: Boolean get() = enabledPacks.isNotEmpty() || otherCount > 0
     val gpsLocked: Boolean get() = location.hasFix && location.isAvailable
 
     val messages: List<StatusMessage>
@@ -51,7 +56,8 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         container.usbCompanion.state,
         container.locationProvider.state,
         container.settings.audioAlerts,
-    ) { scan, usb, location, audio -> RadioState(scan, usb, location, audio) }
+        container.settings.enabledPacks,
+    ) { scan, usb, location, audio, packs -> RadioState(scan, usb, location, audio, packs) }
 
     val uiState: StateFlow<DashboardUiState> = combine(
         sessionManager.currentSession,
@@ -65,6 +71,7 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
             usb = r.usb,
             location = r.location,
             audioEnabled = r.audio,
+            enabledPacks = r.packs,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 
@@ -88,5 +95,6 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         val usb: UsbState,
         val location: LocationState,
         val audio: Boolean,
+        val packs: Set<PackId>,
     )
 }
