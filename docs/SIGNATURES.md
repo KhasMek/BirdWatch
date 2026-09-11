@@ -99,7 +99,7 @@ composite or the name counts.
 | DJI | OUIs `0c:9a:e6`, `8c:58:23`, `04:a8:5a`, `58:b8:58`, `e4:7a:2c`, `60:60:1f`, `48:1c:b9`, `34:d2:62` | OUI | WiFi (aircraft/controller AP) | HIGH | S6 |
 | Parrot | OUIs `00:12:1c`, `00:26:7e`, `90:03:b7`, `90:3a:e6`, `a0:14:3d` | OUI | WiFi | HIGH | S6 |
 | Skydio | OUI `38:1d:14` | OUI | WiFi | HIGH | S6 |
-| Any Remote-ID-compliant UAS | ASTM F3411 / Open Drone ID: BLE service data UUID `0xFFFA` + app code `0x0D` (legacy single message or BT5 Message Pack); WiFi beacon vendor IE 221 with OUI `FA:0B:BC` + type `0x0D`. Decoded: Basic ID (serial / registration, UA type), Location (position, altitude, speed, track), System (operator position), Operator ID, Self ID | protocol | BLE + WiFi beacon (API 30+) | HIGH (standardised; the payload is the evidence) | S10 |
+| Any Remote-ID-compliant UAS | ASTM F3411 / Open Drone ID: BLE service data UUID `0xFFFA` + app code `0x0D` (legacy single message or BT5 Message Pack); WiFi beacon vendor IE 221 with OUI `FA:0B:BC` + type `0x0D`. Decoded: Basic ID (serial / registration, UA type), Location (position, altitude, speed, track), System (operator position), Operator ID, Self ID. Map and KML show the aircraft at its reported position **and** the operator at theirs, joined by a dashed line | protocol | BLE + WiFi beacon (API 30+) | HIGH (standardised; the payload is the evidence) | S10 |
 
 ---
 

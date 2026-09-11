@@ -37,6 +37,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.Dash
+import com.google.android.gms.maps.model.Gap
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.maps.android.compose.GoogleMap
@@ -44,10 +46,12 @@ import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.MarkerInfoWindowContent
 import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.khasmek.flockyou.detection.DetectedDevice
 import com.khasmek.flockyou.detection.DeviceCategory
 import com.khasmek.flockyou.ui.appViewModel
+import com.khasmek.flockyou.ui.theme.DetectionColors
 import com.khasmek.flockyou.util.Permissions
 import com.khasmek.flockyou.util.TimeFormat
 
@@ -99,6 +103,7 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
             mappable.forEach {
                 if (it.hasTargetLocation) b.include(LatLng(it.targetLatitude!!, it.targetLongitude!!))
                 else b.include(LatLng(it.latitude!!, it.longitude!!))
+                if (it.hasOperatorLocation) b.include(LatLng(it.operatorLatitude!!, it.operatorLongitude!!))
             }
             runCatching {
                 if (mappable.size == 1) {
@@ -149,7 +154,48 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
             properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
             uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = hasLocationPermission),
         ) {
-            mappable.forEach { device -> DeviceMarker(device) }
+            mappable.forEach { device ->
+                DeviceMarker(device)
+                if (device.hasOperatorLocation) OperatorMarker(device)
+            }
+        }
+    }
+}
+
+/**
+ * Remote ID: the pilot's position from the System message, drawn as a rose marker with a dashed
+ * line back to the aircraft so it is obvious which operator belongs to which drone.
+ */
+@Composable
+private fun OperatorMarker(device: DetectedDevice) {
+    val operator = LatLng(device.operatorLatitude!!, device.operatorLongitude!!)
+    val markerState = remember(device.macAddress, operator) { MarkerState(operator) }
+    val icon = remember { BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ROSE) }
+    val label = device.uasId ?: device.displayName
+
+    if (device.hasTargetLocation) {
+        Polyline(
+            points = listOf(LatLng(device.targetLatitude!!, device.targetLongitude!!), operator),
+            color = DetectionColors.Drone,
+            width = 5f,
+            pattern = listOf(Dash(24f), Gap(12f)),
+            zIndex = 1f,
+        )
+    }
+    MarkerInfoWindowContent(
+        state = markerState,
+        title = "Operator · $label",
+        icon = icon,
+    ) {
+        Column(Modifier.padding(4.dp)) {
+            Text("Operator of $label", style = MaterialTheme.typography.titleSmall)
+            device.operatorId?.let { Text("ID $it", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
+            Text(
+                "%.5f, %.5f".format(device.operatorLatitude, device.operatorLongitude),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text("Position reported by the drone's Remote ID broadcast", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -157,8 +203,12 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
 @Composable
 private fun DeviceMarker(device: DetectedDevice) {
     // A Remote ID drone tells us where IT is; everything else is placed where the phone was.
-    val position = if (device.hasTargetLocation) LatLng(device.targetLatitude!!, device.targetLongitude!!)
-    else LatLng(device.latitude!!, device.longitude!!)
+    // (A drone that reported only an operator position gets just the operator marker.)
+    val position = when {
+        device.hasTargetLocation -> LatLng(device.targetLatitude!!, device.targetLongitude!!)
+        device.hasLocation -> LatLng(device.latitude!!, device.longitude!!)
+        else -> return
+    }
     val markerState = remember(device.macAddress, position) { MarkerState(position) }
     val hue = when (device.deviceType.category) {
         DeviceCategory.FLOCK_ALPR -> BitmapDescriptorFactory.HUE_ORANGE

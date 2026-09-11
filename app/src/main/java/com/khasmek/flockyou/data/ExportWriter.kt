@@ -117,12 +117,15 @@ object ExportWriter {
 
     fun kml(session: ScanSession, devices: List<DetectedDevice>): String = buildString {
         val located = devices.filter { it.hasLocation || it.hasTargetLocation }
+        val operators = devices.filter { it.hasOperatorLocation }
         appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
         appendLine("""<kml xmlns="http://www.opengis.net/kml/2.2">""")
         appendLine("<Document>")
         appendLine("  <name>${xml("Flock You Companion session " + isoCompact(session.startedAt))}</name>")
         appendLine("  <description>${xml("${devices.size} devices, ${located.size} with GPS. Session ${session.id}")}</description>")
         KML_STYLES.forEach { (id, style) -> appendLine("  <Style id=\"$id\"><IconStyle><color>${style.first}</color><scale>1.1</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/${style.second}.png</href></Icon></IconStyle></Style>") }
+        appendLine("""  <Style id="operator"><IconStyle><color>ff8f40e9</color><scale>1.0</scale><Icon><href>http://maps.google.com/mapfiles/kml/paddle/pink-circle.png</href></Icon></IconStyle></Style>""")
+        appendLine("""  <Style id="operator-link"><LineStyle><color>b37a6e54</color><width>3</width></LineStyle></Style>""")
         located.forEach { d ->
             appendLine("  <Placemark>")
             appendLine("    <name>${xml("${d.deviceType.label}: ${d.displayName}")}</name>")
@@ -156,6 +159,29 @@ object ExportWriter {
                 appendLine("    <Point><coordinates>${fmt(d.longitude!!)},${fmt(d.latitude!!)},0</coordinates></Point>")
             }
             appendLine("  </Placemark>")
+        }
+        // Remote ID operators: their own placemark plus a dashed-style line back to the aircraft.
+        operators.forEach { d ->
+            val label = xml(d.uasId ?: d.displayName)
+            appendLine("  <Placemark>")
+            appendLine("    <name>Operator: $label</name>")
+            appendLine("    <styleUrl>#operator</styleUrl>")
+            appendLine("    <description><![CDATA[")
+            appendLine("      <b>Operator of:</b> $label<br/>")
+            d.operatorId?.let { appendLine("      <b>Operator ID:</b> ${xml(it)}<br/>") }
+            appendLine("      <i>Position reported in the drone's Remote ID System message.</i><br/>")
+            appendLine("    ]]></description>")
+            appendLine("    <Point><coordinates>${fmt(d.operatorLongitude!!)},${fmt(d.operatorLatitude!!)},0</coordinates></Point>")
+            appendLine("  </Placemark>")
+            if (d.hasTargetLocation) {
+                appendLine("  <Placemark>")
+                appendLine("    <name>$label ↔ operator</name>")
+                appendLine("    <styleUrl>#operator-link</styleUrl>")
+                appendLine("    <LineString><tessellate>1</tessellate><coordinates>")
+                appendLine("      ${fmt(d.targetLongitude!!)},${fmt(d.targetLatitude!!)},0 ${fmt(d.operatorLongitude)},${fmt(d.operatorLatitude)},0")
+                appendLine("    </coordinates></LineString>")
+                appendLine("  </Placemark>")
+            }
         }
         appendLine("</Document>")
         appendLine("</kml>")

@@ -69,8 +69,26 @@ class ExportWriterTest {
         assertTrue(kml.contains("<coordinates>-122.987654,37.123457,0</coordinates>"))
         assertEquals(1, Regex("<Placemark>").findAll(kml).count())
         assertTrue(kml.contains("<styleUrl>#flock</styleUrl>"))
+        assertFalse(kml.contains("Operator:"))
         assertTrue(kml.contains("2 devices, 1 with GPS"))
         assertFalse(kml.contains("D4:11:D6")) // raven has no GPS
+    }
+
+    @Test
+    fun `kml places a remote id drone at its own position and adds an operator placemark and link`() {
+        val drone = raven.copy(
+            macAddress = "7A:00:00:00:00:01", deviceName = null, detectionMethod = DetectionMethod.REMOTE_ID_BLE,
+            deviceType = DeviceType.REMOTE_ID_UAS, matchedOn = "SER1", uasId = "SER1", operatorId = "FIN87",
+            targetLatitude = 37.0, targetLongitude = -122.0, targetAltitudeM = 120.0,
+            operatorLatitude = 37.001, operatorLongitude = -122.001,
+        )
+        val kml = ExportWriter.kml(session, listOf(drone))
+        assertEquals(3, Regex("<Placemark>").findAll(kml).count()) // drone, operator, link
+        assertTrue(kml.contains("<altitudeMode>absolute</altitudeMode><coordinates>-122.000000,37.000000,120</coordinates>"))
+        assertTrue(kml.contains("<name>Operator: SER1</name>"))
+        assertTrue(kml.contains("<coordinates>-122.001000,37.001000,0</coordinates>"))
+        assertTrue(kml.contains("<LineString>"))
+        assertTrue(kml.contains("<styleUrl>#drone</styleUrl>"))
     }
 
     @Test
