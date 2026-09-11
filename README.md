@@ -166,8 +166,8 @@ Jetpack Compose, Room, and the Google Maps Compose library.
 
 ## License
 
-The upstream flock-you project is MIT licensed. A license for this repository has not been
-chosen yet; until one is added, treat the code as all rights reserved.
+[MIT](LICENSE). The upstream flock-you project is MIT licensed as well; please keep the research
+credits above intact if you fork or redistribute, as its authors ask.
 
 ## Disclaimer
 
