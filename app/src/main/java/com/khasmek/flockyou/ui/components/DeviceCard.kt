@@ -125,6 +125,20 @@ fun DeviceCard(device: DetectedDevice, now: Long, modifier: Modifier = Modifier)
                     DetailRow("Matched on", device.matchedOn)
                     device.channel?.let { DetailRow("WiFi channel", it.toString()) }
                     device.ravenFirmware?.let { DetailRow("Raven firmware", it) }
+                    if (device.isRemoteId) {
+                        device.uasId?.let { DetailRow("UAS ID", it) }
+                        device.operatorId?.let { DetailRow("Operator ID", it) }
+                        if (device.hasTargetLocation) {
+                            DetailRow(
+                                "Drone position",
+                                "%.5f, %.5f".format(device.targetLatitude, device.targetLongitude) +
+                                    (device.targetAltitudeM?.let { "  alt %.0f m".format(it) } ?: ""),
+                            )
+                        }
+                        if (device.hasOperatorLocation) {
+                            DetailRow("Operator", "%.5f, %.5f".format(device.operatorLatitude, device.operatorLongitude))
+                        }
+                    }
                 }
             }
         }

@@ -17,8 +17,12 @@ enum class DetectionSource(val label: String) {
  * One unique detected device within one scan session. Room entity; the composite key means the
  * same MAC seen in two sessions is two rows, so sessions can be reviewed and deleted independently.
  *
- * Both detection sources write the same shape. BLE fills [ravenFirmware]; ESP32 fills [tier] and
- * [channel]; everything else is common.
+ * All detection sources write the same shape. BLE fills [ravenFirmware]; ESP32 fills [tier] and
+ * [channel]; Remote ID fills the `uasId` / `operatorId` / `target*` / `operator*` columns
+ * (schema v2); everything else is common.
+ *
+ * [latitude]/[longitude] are always the **phone's** position at the sighting. A Remote ID drone
+ * additionally reports its own position in [targetLatitude]/[targetLongitude].
  */
 @Entity(
     tableName = "detected_devices",
@@ -51,10 +55,49 @@ data class DetectedDevice(
     val lastSeen: Long,
     /** How many advertisements / frames matched for this MAC. */
     val sightings: Int = 1,
+
+    // ---- Remote ID (ASTM F3411), schema v2. Null for every other detection. ----
+    /** UAS serial number / registration from the Basic ID message. */
+    val uasId: String? = null,
+    /** Operator registration id from the Operator ID message. */
+    val operatorId: String? = null,
+    /** The drone's self-reported position (Location message). */
+    val targetLatitude: Double? = null,
+    val targetLongitude: Double? = null,
+    /** Geodetic altitude in metres from the Location message. */
+    val targetAltitudeM: Double? = null,
+    /** Operator / takeoff position from the System message. */
+    val operatorLatitude: Double? = null,
+    val operatorLongitude: Double? = null,
 ) {
     val displayName: String
-        get() = deviceName?.takeIf { it.isNotBlank() } ?: "Unknown"
+        get() = deviceName?.takeIf { it.isNotBlank() } ?: uasId?.takeIf { it.isNotBlank() } ?: "Unknown"
 
     val hasLocation: Boolean
         get() = latitude != null && longitude != null
+
+    val hasTargetLocation: Boolean
+        get() = targetLatitude != null && targetLongitude != null
+
+    val hasOperatorLocation: Boolean
+        get() = operatorLatitude != null && operatorLongitude != null
+
+    val isRemoteId: Boolean
+        get() = detectionMethod == DetectionMethod.REMOTE_ID_BLE || detectionMethod == DetectionMethod.REMOTE_ID_WIFI
+
+    /** Fold a decoded Remote ID payload into this row, keeping earlier values where the new broadcast omits them. */
+    fun withRemoteId(p: RemoteId.Payload?): DetectedDevice {
+        if (p == null) return this
+        val loc = p.location
+        val sys = p.system
+        return copy(
+            uasId = p.basicId?.uasId?.takeIf { it.isNotBlank() } ?: uasId,
+            operatorId = p.operatorId?.operatorId?.takeIf { it.isNotBlank() } ?: operatorId,
+            targetLatitude = loc?.latitude ?: targetLatitude,
+            targetLongitude = loc?.longitude ?: targetLongitude,
+            targetAltitudeM = loc?.altitudeGeodeticM ?: targetAltitudeM,
+            operatorLatitude = sys?.operatorLatitude ?: operatorLatitude,
+            operatorLongitude = sys?.operatorLongitude ?: operatorLongitude,
+        )
+    }
 }

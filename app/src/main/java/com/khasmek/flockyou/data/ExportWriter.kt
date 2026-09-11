@@ -69,6 +69,17 @@ object ExportWriter {
                         put("first_seen", iso(d.firstSeen))
                         put("last_seen", iso(d.lastSeen))
                         put("sightings", d.sightings)
+                        if (d.isRemoteId) {
+                            put("remote_id", buildJsonObject {
+                                put("uas_id", d.uasId?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("operator_id", d.operatorId?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("target_latitude", d.targetLatitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("target_longitude", d.targetLongitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("target_altitude_m", d.targetAltitudeM?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("operator_latitude", d.operatorLatitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("operator_longitude", d.operatorLongitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                            })
+                        }
                     })
                 }
             })
@@ -80,6 +91,8 @@ object ExportWriter {
         "session_id", "mac_address", "device_name", "source", "detection_method", "device_type", "category",
         "confidence", "matched_on", "raven_fw", "detection_tier", "channel", "rssi",
         "latitude", "longitude", "gps_accuracy_m", "first_seen", "last_seen", "sightings",
+        "uas_id", "operator_id", "target_latitude", "target_longitude", "target_altitude_m",
+        "operator_latitude", "operator_longitude",
     )
 
     fun csv(devices: List<DetectedDevice>): String = buildString {
@@ -93,13 +106,17 @@ object ExportWriter {
                     d.latitude?.let { fmt(it) } ?: "", d.longitude?.let { fmt(it) } ?: "",
                     d.accuracyMeters?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "",
                     iso(d.firstSeen), iso(d.lastSeen), d.sightings.toString(),
+                    d.uasId ?: "", d.operatorId ?: "",
+                    d.targetLatitude?.let { fmt(it) } ?: "", d.targetLongitude?.let { fmt(it) } ?: "",
+                    d.targetAltitudeM?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "",
+                    d.operatorLatitude?.let { fmt(it) } ?: "", d.operatorLongitude?.let { fmt(it) } ?: "",
                 ).joinToString(",") { csvCell(it) }
             )
         }
     }
 
     fun kml(session: ScanSession, devices: List<DetectedDevice>): String = buildString {
-        val located = devices.filter { it.hasLocation }
+        val located = devices.filter { it.hasLocation || it.hasTargetLocation }
         appendLine("""<?xml version="1.0" encoding="UTF-8"?>""")
         appendLine("""<kml xmlns="http://www.opengis.net/kml/2.2">""")
         appendLine("<Document>")
@@ -125,8 +142,19 @@ object ExportWriter {
             appendLine("      <b>First seen:</b> ${iso(d.firstSeen)}<br/>")
             appendLine("      <b>Last seen:</b> ${iso(d.lastSeen)}<br/>")
             d.accuracyMeters?.let { appendLine("      <b>GPS accuracy:</b> ${String.format(Locale.ROOT, "%.0f", it)} m<br/>") }
+            if (d.isRemoteId) {
+                d.uasId?.let { appendLine("      <b>UAS ID:</b> ${xml(it)}<br/>") }
+                d.operatorId?.let { appendLine("      <b>Operator ID:</b> ${xml(it)}<br/>") }
+                if (d.hasOperatorLocation) appendLine("      <b>Operator position:</b> ${fmt(d.operatorLatitude!!)}, ${fmt(d.operatorLongitude!!)}<br/>")
+                if (d.hasTargetLocation) appendLine("      <i>Placemark is the drone's self-reported position.</i><br/>")
+            }
             appendLine("    ]]></description>")
-            appendLine("    <Point><coordinates>${fmt(d.longitude!!)},${fmt(d.latitude!!)},0</coordinates></Point>")
+            // Drones are placed where they say they are (with altitude); everything else where the phone was.
+            if (d.hasTargetLocation) {
+                appendLine("    <Point><altitudeMode>absolute</altitudeMode><coordinates>${fmt(d.targetLongitude!!)},${fmt(d.targetLatitude!!)},${String.format(Locale.ROOT, "%.0f", d.targetAltitudeM ?: 0.0)}</coordinates></Point>")
+            } else {
+                appendLine("    <Point><coordinates>${fmt(d.longitude!!)},${fmt(d.latitude!!)},0</coordinates></Point>")
+            }
             appendLine("  </Placemark>")
         }
         appendLine("</Document>")

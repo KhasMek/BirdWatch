@@ -10,11 +10,13 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.khasmek.flockyou.detection.Classification
 import com.khasmek.flockyou.detection.DetectedDevice
 import com.khasmek.flockyou.detection.DetectionSource
 import com.khasmek.flockyou.detection.DetectionTable
 import com.khasmek.flockyou.detection.DeviceClassifier
 import com.khasmek.flockyou.detection.PackId
+import com.khasmek.flockyou.detection.RemoteId
 import com.khasmek.flockyou.location.GeoFix
 import com.khasmek.flockyou.util.Permissions
 import kotlinx.coroutines.CoroutineScope
@@ -156,7 +158,9 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         val fix = locationSource?.invoke()
         for (r in results) {
             val bssid = r.BSSID ?: continue
-            val classification = DeviceClassifier.classifyWifiAp(bssid, enabledPacks) ?: continue
+            val classification = DeviceClassifier.classifyWifiAp(bssid, enabledPacks)
+                ?: remoteIdClassification(r)
+                ?: continue
             val mac = DetectionTable.normalizeMac(bssid)
             val ssid = r.ssidOrNull()
             val channel = WifiChannels.fromFrequencyMhz(r.frequency)
@@ -181,7 +185,7 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
                         firstSeen = now,
                         lastSeen = now,
                         sightings = 1,
-                    )
+                    ).withRemoteId(classification.remoteId)
                 },
                 merge = { existing ->
                     existing.copy(
@@ -193,7 +197,7 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
                         latitude = fix?.latitude ?: existing.latitude,
                         longitude = fix?.longitude ?: existing.longitude,
                         accuracyMeters = if (fix != null) fix.accuracyMeters else existing.accuracyMeters,
-                    )
+                    ).withRemoteId(classification.remoteId)
                 },
             )
             if (isNew) {
@@ -201,6 +205,23 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
                     "[${classification.method.wireName} on ${classification.matchedOn}] ${stored.deviceType.label}")
             }
         }
+    }
+
+    /**
+     * WiFi Beacon Remote ID: a vendor-specific information element (id 221) with the ASD-STAN
+     * OUI. Android exposes beacon IEs from API 30; earlier phones simply never match this path.
+     */
+    private fun remoteIdClassification(r: ScanResult): Classification? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        if (PackId.DRONES !in enabledPacks) return null
+        for (ie in r.informationElements) {
+            if (ie.id != VENDOR_SPECIFIC_IE) continue
+            val buf = ie.bytes
+            val bytes = ByteArray(buf.remaining()).also { buf.duplicate().get(it) }
+            if (!RemoteId.isWifiRemoteIdIe(bytes)) continue
+            DeviceClassifier.classifyWifiRemoteId(bytes, enabledPacks)?.let { return it }
+        }
+        return null
     }
 
     @Suppress("DEPRECATION")
@@ -217,6 +238,7 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         private const val TAG = "FlockYou/WifiAp"
         /** Stays under Android's 4-per-2-minutes foreground throttle with a little margin. */
         private const val REQUEST_INTERVAL_MS = 35_000L
+        private const val VENDOR_SPECIFIC_IE = 221
     }
 }
 

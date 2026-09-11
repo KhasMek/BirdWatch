@@ -243,7 +243,13 @@ All eight phases are complete. Remaining hardware validation: live ESP32 USB ser
      "Phone WiFi access-point scan" switch in Settings, off by default; needs
      ACCESS_WIFI_STATE + CHANGE_WIFI_STATE. Rooted tip: `settings put global
      wifi_scan_throttle_enabled 0`.
-   - 9c — stretch: BLE Remote ID (ASTM F3411) decoding.
+   - 9c — **done**: `detection/RemoteId.kt` is a pure ASTM F3411 / Open Drone ID decoder (Basic
+     ID, Location, System, Operator ID, Self ID, Message Pack). Consumed from BLE service data
+     under UUID 0xFFFA (`BleAdvertisement.serviceData`) and from WiFi beacon vendor IEs with the
+     ASD-STAN OUI (`ScanResult.informationElements`, API 30+). Gated by the Drones pack;
+     `DeviceType.REMOTE_ID_UAS`, methods `REMOTE_ID_BLE` / `REMOTE_ID_WIFI`. Room schema **v2**
+     (auto-migration) adds nullable `uasId`, `operatorId`, `target*` (drone-reported position /
+     altitude) and `operator*` columns; map and KML place a drone at its own reported position.
 
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest
 commit points and messages but never run git.

@@ -235,7 +235,7 @@ class BleScanner(context: Context) {
                     firstSeen = now,
                     lastSeen = now,
                     sightings = 1,
-                )
+                ).withRemoteId(classification.remoteId)
             },
             merge = { existing ->
                 existing.copy(
@@ -248,7 +248,7 @@ class BleScanner(context: Context) {
                     latitude = fix?.latitude ?: existing.latitude,
                     longitude = fix?.longitude ?: existing.longitude,
                     accuracyMeters = if (fix != null) fix.accuracyMeters else existing.accuracyMeters,
-                )
+                ).withRemoteId(classification.remoteId) // a drone's position updates every second
             },
         )
 
@@ -283,11 +283,13 @@ class BleScanner(context: Context) {
             buildSet { for (i in 0 until sa.size()) add(sa.keyAt(i)) }
         } ?: emptySet()
         val uuids = record?.serviceUuids?.map { it.uuid.toString() } ?: emptyList()
+        val serviceData = record?.serviceData?.entries?.associate { (uuid, bytes) -> uuid.uuid.toString() to bytes } ?: emptyMap()
         return BleAdvertisement(
             macAddress = mac,
             deviceName = name,
             manufacturerIds = mfrIds,
             serviceUuids = uuids,
+            serviceData = serviceData,
         )
     }
 

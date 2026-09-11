@@ -96,7 +96,10 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
         if (framed) return@LaunchedEffect
         if (mappable.isNotEmpty()) {
             val b = LatLngBounds.builder()
-            mappable.forEach { b.include(LatLng(it.latitude!!, it.longitude!!)) }
+            mappable.forEach {
+                if (it.hasTargetLocation) b.include(LatLng(it.targetLatitude!!, it.targetLongitude!!))
+                else b.include(LatLng(it.latitude!!, it.longitude!!))
+            }
             runCatching {
                 if (mappable.size == 1) {
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(b.build().center, 15f))
@@ -153,7 +156,9 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
 
 @Composable
 private fun DeviceMarker(device: DetectedDevice) {
-    val position = LatLng(device.latitude!!, device.longitude!!)
+    // A Remote ID drone tells us where IT is; everything else is placed where the phone was.
+    val position = if (device.hasTargetLocation) LatLng(device.targetLatitude!!, device.targetLongitude!!)
+    else LatLng(device.latitude!!, device.longitude!!)
     val markerState = remember(device.macAddress, position) { MarkerState(position) }
     val hue = when (device.deviceType.category) {
         DeviceCategory.FLOCK_ALPR -> BitmapDescriptorFactory.HUE_ORANGE
@@ -188,6 +193,10 @@ private fun DeviceMarker(device: DetectedDevice) {
                 "First ${TimeFormat.dateTime(device.firstSeen)} · last ${TimeFormat.clock(device.lastSeen)}",
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (device.isRemoteId) {
+                device.operatorId?.let { Text("Operator $it", style = MaterialTheme.typography.bodySmall) }
+                device.targetAltitudeM?.let { Text("Altitude %.0f m (drone-reported position)".format(it), style = MaterialTheme.typography.bodySmall) }
+            }
         }
     }
 }

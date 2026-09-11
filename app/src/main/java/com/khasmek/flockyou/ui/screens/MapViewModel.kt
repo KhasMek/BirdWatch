@@ -27,7 +27,7 @@ data class MapUiState(
     val fix: GeoFix? = null,
 ) {
     val hasKey: Boolean get() = !apiKey.isNullOrBlank()
-    val mappable: List<DetectedDevice> get() = devices.filter { it.hasLocation }
+    val mappable: List<DetectedDevice> get() = devices.filter { it.hasLocation || it.hasTargetLocation }
     val unmappedCount: Int get() = devices.size - mappable.size
 }
 

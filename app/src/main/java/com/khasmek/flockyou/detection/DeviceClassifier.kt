@@ -11,12 +11,15 @@ import java.util.Locale
  * @param manufacturerIds Company IDs present in manufacturer-specific data (AD type 0xFF).
  * @param serviceUuids    Advertised service UUIDs. 16-bit ("180a"), 32-bit or full 128-bit forms
  *                        are all accepted and normalised.
+ * @param serviceData     Service-data payloads (AD type 0x16/0x20/0x21) keyed by UUID in any form.
+ *                        Used for Remote ID (UUID 0xFFFA).
  */
 data class BleAdvertisement(
     val macAddress: String,
     val deviceName: String? = null,
     val manufacturerIds: Set<Int> = emptySet(),
     val serviceUuids: List<String> = emptyList(),
+    val serviceData: Map<String, ByteArray> = emptyMap(),
 )
 
 /**
@@ -40,6 +43,10 @@ enum class DetectionMethod(val wireName: String, val label: String) {
 
     // Phone WiFi access-point scan (phase 9b): the AP's BSSID carries the vendor OUI
     WIFI_AP_OUI("wifi_ap_oui", "WiFi AP OUI"),
+
+    // ASTM F3411 Remote ID broadcast (phase 9c), decoded from BLE service data or a WiFi beacon IE
+    REMOTE_ID_BLE("remote_id_ble", "Remote ID (BLE)"),
+    REMOTE_ID_WIFI("remote_id_wifi", "Remote ID (WiFi beacon)"),
 
     // ESP32 WiFi promiscuous firmware, by confidence tier (4 = highest)
     WIFI_WILDCARD_PROBE_IE_SIG("wifi_wildcard_probe_ie_sig", "Probe + IE fingerprint"),
@@ -81,7 +88,9 @@ enum class DeviceType(val label: String, val category: DeviceCategory) {
     META_GLASSES("Meta glasses", DeviceCategory.WEARABLE_CAMERA),
     DJI("DJI", DeviceCategory.DRONE),
     PARROT("Parrot", DeviceCategory.DRONE),
-    SKYDIO("Skydio", DeviceCategory.DRONE);
+    SKYDIO("Skydio", DeviceCategory.DRONE),
+    /** Any UAS broadcasting ASTM F3411 Remote ID, vendor unknown. */
+    REMOTE_ID_UAS("Remote ID drone", DeviceCategory.DRONE);
 
     val isCore: Boolean get() = category == DeviceCategory.FLOCK_ALPR || category == DeviceCategory.GUNSHOT_DETECTOR
 }
@@ -94,6 +103,7 @@ enum class Confidence { HIGH, LOW }
  * @param matchedOn     The concrete prefix / name pattern / company ID / UUID that triggered.
  * @param ravenFirmware "1.1.x", "1.2.x", "1.3.x" or "?" for Raven hits; null otherwise.
  * @param pack          The opt-in pack that matched, or null for Core (Flock / Raven).
+ * @param remoteId      Decoded Remote ID broadcast, for REMOTE_ID_* methods.
  */
 data class Classification(
     val method: DetectionMethod,
@@ -102,6 +112,7 @@ data class Classification(
     val matchedOn: String,
     val ravenFirmware: String? = null,
     val pack: PackId? = null,
+    val remoteId: RemoteId.Payload? = null,
 )
 
 /**
@@ -131,6 +142,22 @@ object DeviceClassifier {
         if (enabledPacks.isEmpty()) return null
         val uuids = adv.serviceUuids.map(::normalizeUuid).toSet()
         val prefix = macPrefix(adv.macAddress)
+
+        // Remote ID is a protocol, not a vendor signature: any UAS broadcasting it counts, and
+        // the payload itself is the evidence. Lives under the Drones pack.
+        if (PackId.DRONES in enabledPacks) {
+            remoteIdFromBle(adv)?.let { payload ->
+                return Classification(
+                    method = DetectionMethod.REMOTE_ID_BLE,
+                    deviceType = DeviceType.REMOTE_ID_UAS,
+                    confidence = Confidence.HIGH,
+                    matchedOn = payload.label,
+                    pack = PackId.DRONES,
+                    remoteId = payload,
+                )
+            }
+        }
+
         for (pack in SignaturePacks.OPTIONAL) {
             if (pack.id !in enabledPacks) continue
             for (sig in pack.signatures) {
@@ -219,6 +246,26 @@ object DeviceClassifier {
             }
         }
         return null
+    }
+
+    /** Decode Remote ID from a WiFi beacon's vendor IE (bytes starting at the OUI). Drones pack only. */
+    fun classifyWifiRemoteId(vendorIe: ByteArray?, enabledPacks: Set<PackId>): Classification? {
+        if (PackId.DRONES !in enabledPacks) return null
+        val payload = RemoteId.parseWifiVendorIe(vendorIe) ?: return null
+        return Classification(
+            method = DetectionMethod.REMOTE_ID_WIFI,
+            deviceType = DeviceType.REMOTE_ID_UAS,
+            confidence = Confidence.HIGH,
+            matchedOn = payload.label,
+            pack = PackId.DRONES,
+            remoteId = payload,
+        )
+    }
+
+    /** The Open Drone ID payload under service UUID 0xFFFA, if this advertisement carries one. */
+    fun remoteIdFromBle(adv: BleAdvertisement): RemoteId.Payload? {
+        val data = adv.serviceData.entries.firstOrNull { normalizeUuid(it.key) == RemoteId.BLE_SERVICE_UUID }?.value
+        return RemoteId.parseBleServiceData(data)
     }
 
     private fun match(sig: Signature, adv: BleAdvertisement, prefix: String, uuids: Set<String>): Classification? = when (sig) {
