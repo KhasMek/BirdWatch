@@ -1,0 +1,94 @@
+name: Release build
+
+# Runs when a rolling date-version tag is pushed (YYYY.MM.N, e.g. 2026.09.1), or by hand with the
+# tag name as input. Builds a signed, minified release APK, then publishes a GitHub Release for
+# that tag with the APK attached as BirdWatch-<tag>.apk and the R8 mapping file alongside it.
+#
+#   git tag 2026.09.1 && git push origin 2026.09.1
+#
+# versionName = the tag; versionCode = YYYYMM * 100 + N (see app/build.gradle.kts).
+on:
+  push:
+    tags:
+      - "[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9]*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to build and release (YYYY.MM.N, e.g. 2026.09.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+    steps:
+      - name: Validate tag format
+        run: |
+          if ! [[ "$RELEASE_TAG" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]?$ ]]; then
+            echo "::error::Tag '$RELEASE_TAG' is not a date version (YYYY.MM.N, e.g. 2026.09.1)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          # For a manual run, build exactly the commit the tag points at.
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The keystore is stored as a base64-encoded repository secret and decoded to a temp file.
+      #   base64 -i release.jks | pbcopy      (then paste into the KEYSTORE_BASE64 secret)
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::KEYSTORE_BASE64 secret is not set; refusing to publish a debug-signed APK"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Build signed release APK
+        env:
+          BIRDWATCH_VERSION: ${{ env.RELEASE_TAG }}
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Collect artifacts
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "BirdWatch-$RELEASE_TAG.apk"
+          cp app/build/outputs/mapping/release/mapping.txt "BirdWatch-$RELEASE_TAG-mapping.txt"
+          sha256sum "BirdWatch-$RELEASE_TAG.apk" > "BirdWatch-$RELEASE_TAG.apk.sha256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          draft: false
+          generate_release_notes: true
+          files: |
+            BirdWatch-${{ env.RELEASE_TAG }}.apk
+            BirdWatch-${{ env.RELEASE_TAG }}.apk.sha256
+            BirdWatch-${{ env.RELEASE_TAG }}-mapping.txt

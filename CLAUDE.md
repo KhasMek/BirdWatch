@@ -257,11 +257,29 @@ All eight phases are complete. Remaining hardware validation: live ESP32 USB ser
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest
 commit points and messages but never run git.
 
-## Build & test
+## Build, test, release
 ```bash
-./gradlew assembleDebug          # compile
-./gradlew testDebugUnitTest      # JVM tests (classifier, parser)
+./gradlew assembleDebug          # compile ("dev-debug" version)
+./gradlew testDebugUnitTest      # JVM tests (classifier, parsers, exporters, Remote ID)
 ./gradlew installDebug           # dev device: Pixel 5 (redfin), Android 14, rooted
+./gradlew assembleRelease -PbirdwatchVersion=2026.09.1   # minified; debug-signed unless keystore.properties exists
 ```
+
+**Versioning** is rolling date-based: `YYYY.MM.N` (N = release number within the month, 1-99).
+`versionName` = that string; `versionCode` = `YYYYMM * 100 + N` (2026.09.1 -> 20260901), computed
+in `app/build.gradle.kts` from `BIRDWATCH_VERSION` (env) or `-PbirdwatchVersion`. Without either
+the build is `dev` with versionCode `YYYYMM * 100 + 99` for the current month, so a dev build
+installs over any release of that month and next month's release installs over dev. (Android
+will not downgrade a non-debuggable install even with `adb install -d`; this avoids the
+uninstall.)
+
+**Release**: push a tag `YYYY.MM.N`; `.github/workflows/release.yml` validates the format, runs
+unit tests, builds a signed minified APK, and publishes a GitHub Release with
+`BirdWatch-<tag>.apk`, a sha256, and the R8 `mapping.txt`. It refuses to run without the
+`KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` secrets. CI
+(`ci.yml`) runs build + tests + lint on pushes to `main` and PRs. Release is minified with R8
+(`isMinifyEnabled` + `isShrinkResources`); app-specific rules live in `app/proguard-rules.pro`,
+everything else comes from library consumer rules. Debug and release share the `applicationId`
+on purpose; debug only adds `-debug` to the version name.
 BLE and USB need a physical device. If BLE results are empty: location services on? permissions
 granted? Bluetooth on? For USB: OTG cable, XIAO ESP32-S3 flashed with `../flock-you` firmware.

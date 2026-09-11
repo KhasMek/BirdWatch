@@ -60,8 +60,13 @@ directly; no changes to the firmware are needed.
 
 ### 2. Install BirdWatch
 
-There is no store listing yet. Build from source with a current Android Studio (one that
-supports Android Gradle Plugin 9.2) or from the command line:
+Download the latest `BirdWatch-<version>.apk` from the
+[Releases](../../releases) page and sideload it (you'll need to allow installs from your browser
+or file manager). Versions are dated, `YYYY.MM.N`, so newer is always higher. There is no store
+listing yet.
+
+Or build from source with a current Android Studio (one that supports Android Gradle Plugin
+9.2) or from the command line:
 
 ```bash
 ./gradlew installDebug        # phone connected over adb

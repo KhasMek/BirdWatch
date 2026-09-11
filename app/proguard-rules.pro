@@ -1,21 +1,25 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
+# BirdWatch R8 rules for the minified release build.
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Room, kotlinx-serialization, Play Services (Maps/Location), usb-serial-for-android and the
+# AndroidX libraries all ship their own consumer keep rules, and `proguard-android-optimize.txt`
+# already keeps enums, Parcelables and native methods. The rules below cover only what is
+# specific to this app.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Readable stack traces from sideloaded builds (no Play crash reporting). File names are hidden
+# but line numbers survive, and mapping.txt is kept as a build artifact.
+-keepattributes SourceFile, LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Room stores enums by name via generated code; nothing reflective. The entity and DAOs are
+# referenced directly, so no keep rules are needed. Enum *values* must keep their names though,
+# because the database and exports contain them as strings: the default optimize config keeps
+# `values()`/`valueOf()`, and R8 does not rename enum constants, so this is covered.
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# kotlinx-serialization: we only use the JsonElement tree API (parseToJsonElement / buildJsonObject),
+# no @Serializable classes, so no serializer keep rules apply.
+
+# security-crypto pulls in Tink, which references optional annotation processors that are not on
+# the runtime classpath. These are safe to ignore.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn org.checkerframework.**

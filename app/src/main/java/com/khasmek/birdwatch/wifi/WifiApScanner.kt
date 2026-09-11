@@ -156,6 +156,7 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         }
     }
 
+    @Suppress("DEPRECATION") // isScanAlwaysAvailable is deprecated on API 33+ but still the only readable signal
     private fun wifiWarning(wm: WifiManager): Pair<String?, ScanIssue?> = when {
         wm.isWifiEnabled -> null to null
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && wm.isScanAlwaysAvailable -> null to null // scanning allowed with WiFi "off"
