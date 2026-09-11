@@ -17,6 +17,7 @@ import com.khasmek.birdwatch.detection.DetectionTable
 import com.khasmek.birdwatch.detection.DeviceClassifier
 import com.khasmek.birdwatch.detection.PackId
 import com.khasmek.birdwatch.detection.RemoteId
+import com.khasmek.birdwatch.detection.ScanIssue
 import com.khasmek.birdwatch.location.GeoFix
 import com.khasmek.birdwatch.util.Permissions
 import kotlinx.coroutines.CoroutineScope
@@ -33,7 +34,9 @@ import kotlinx.coroutines.launch
 data class WifiScanStatus(
     val isScanning: Boolean = false,
     val error: String? = null,
+    val errorIssue: ScanIssue? = null,
     val warning: String? = null,
+    val warningIssue: ScanIssue? = null,
     /** Access points in the most recent result set (matched or not). */
     val lastResultCount: Int = 0,
     /** Result sets processed since the last [WifiApScanner.clear]. */
@@ -73,7 +76,15 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
-            if (intent.action == WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) processResults()
+            when (intent.action) {
+                WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> processResults()
+                WifiManager.WIFI_STATE_CHANGED_ACTION -> wifiManager?.let { wm ->
+                    // WiFi toggled while scanning: refresh the warning and, if it just came on, nudge a scan.
+                    val (warning, issue) = wifiWarning(wm)
+                    _status.update { it.copy(warning = warning, warningIssue = issue) }
+                    if (warning == null) requestScan(wm)
+                }
+            }
         }
     }
 
@@ -83,19 +94,24 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         if (receiverRegistered) return
         val wm = wifiManager
         if (wm == null) {
-            _status.update { it.copy(isScanning = false, error = "This device has no WiFi") }
+            _status.update { it.copy(isScanning = false, error = "This device has no WiFi", errorIssue = ScanIssue.NO_WIFI) }
             return
         }
         if (!Permissions.allEssentialGranted(appContext)) {
-            _status.update { it.copy(isScanning = false, error = "Location permission not granted") }
+            _status.update { it.copy(isScanning = false, error = "Location permission not granted", errorIssue = ScanIssue.PERMISSION_DENIED) }
             return
         }
         ContextCompat.registerReceiver(
-            appContext, receiver, IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION),
-            ContextCompat.RECEIVER_EXPORTED, // system broadcast
+            appContext, receiver,
+            IntentFilter().apply {
+                addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION)
+                addAction(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            },
+            ContextCompat.RECEIVER_EXPORTED, // system broadcasts
         )
         receiverRegistered = true
-        _status.update { it.copy(isScanning = true, error = null, warning = wifiWarning(wm)) }
+        val (warning, issue) = wifiWarning(wm)
+        _status.update { it.copy(isScanning = true, error = null, errorIssue = null, warning = warning, warningIssue = issue) }
         Log.i(TAG, "WiFi AP scan started")
 
         // Whatever the system already knows is worth a look immediately.
@@ -128,28 +144,29 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
 
     @Suppress("DEPRECATION") // startScan is deprecated but still the only way to nudge a scan
     private fun requestScan(wm: WifiManager) {
-        val warning = wifiWarning(wm)
+        val (warning, issue) = wifiWarning(wm)
         if (warning != null) {
-            _status.update { it.copy(warning = warning) }
+            _status.update { it.copy(warning = warning, warningIssue = issue) }
             return
         }
         val accepted = try { wm.startScan() } catch (e: SecurityException) { false }
         _status.update {
-            it.copy(warning = if (accepted) null else "Android throttled the WiFi scan; using system scans only")
+            if (accepted) it.copy(warning = null, warningIssue = null)
+            else it.copy(warning = "Android throttled the WiFi scan; using system scans only", warningIssue = ScanIssue.WIFI_THROTTLED)
         }
     }
 
-    private fun wifiWarning(wm: WifiManager): String? = when {
-        wm.isWifiEnabled -> null
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && wm.isScanAlwaysAvailable -> null // scanning allowed with WiFi "off"
-        else -> "WiFi is off; turn it on (or allow scanning while off) for AP detection"
+    private fun wifiWarning(wm: WifiManager): Pair<String?, ScanIssue?> = when {
+        wm.isWifiEnabled -> null to null
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && wm.isScanAlwaysAvailable -> null to null // scanning allowed with WiFi "off"
+        else -> "WiFi is off; turn it on (or allow scanning while off) for AP detection" to ScanIssue.WIFI_OFF
     }
 
     @SuppressLint("MissingPermission") // ACCESS_FINE_LOCATION checked in start()
     private fun processResults() {
         val wm = wifiManager ?: return
         val results: List<ScanResult> = try { wm.scanResults } catch (e: SecurityException) {
-            _status.update { it.copy(error = "Location permission not granted") }
+            _status.update { it.copy(error = "Location permission not granted", errorIssue = ScanIssue.PERMISSION_DENIED) }
             return
         }
         _status.update { it.copy(lastResultCount = results.size, resultSets = it.resultSets + 1) }

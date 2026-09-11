@@ -7,10 +7,14 @@ import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
 import com.khasmek.birdwatch.location.GeoFix
 import com.khasmek.birdwatch.util.Permissions
@@ -26,8 +30,10 @@ data class ScanStatus(
     val scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY,
     /** Fatal problem that stopped (or prevented) scanning. */
     val error: String? = null,
+    val errorIssue: ScanIssue? = null,
     /** Non-fatal condition that may suppress results, e.g. location services off. */
     val warning: String? = null,
+    val warningIssue: ScanIssue? = null,
     /** Total advertisements seen since the last [BleScanner.clear], matched or not. Proves the radio is alive. */
     val rawAdvertisements: Long = 0,
 )
@@ -37,6 +43,10 @@ data class ScanStatus(
  * framework-free [BleAdvertisement] and run through [DeviceClassifier]. Matches land in a
  * [DetectionTable] keyed by MAC: a re-sighting updates RSSI, name (if newly available), lastSeen
  * and the sighting count, exactly like the firmware's `fyAddDetection()`.
+ *
+ * If [start] is called while Bluetooth is off, the scanner remembers that it *wants* to scan and
+ * starts by itself the moment the adapter comes on; the location-services warning likewise
+ * clears itself when the user flips location back on.
  *
  * Thread-safety: [ScanCallback] runs on a binder thread; [DetectionTable] and the status
  * [MutableStateFlow] are both safe to touch from there.
@@ -75,25 +85,61 @@ class BleScanner(context: Context) {
     private var lastRawPublish = 0L
     private var activeCallback: ScanCallback? = null
 
+    /** True between start() and stop(): the session wants scanning even if the radio is currently off. */
+    @Volatile
+    private var wantScanning = false
+
     val isScanning: Boolean get() = _status.value.isScanning
+
+    private val systemReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (intent.action) {
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    if (state == BluetoothAdapter.STATE_ON && wantScanning && activeCallback == null) {
+                        Log.i(TAG, "Bluetooth came on; resuming scan")
+                        start(_status.value.scanMode)
+                    } else if (state == BluetoothAdapter.STATE_OFF && activeCallback != null) {
+                        activeCallback = null // the stack already tore the scan down
+                        _status.update { it.copy(isScanning = false, error = "Bluetooth is turned off", errorIssue = ScanIssue.BLUETOOTH_OFF) }
+                    }
+                }
+                LocationManager.MODE_CHANGED_ACTION -> if (activeCallback != null) {
+                    val (warning, issue) = locationWarning()
+                    _status.update { it.copy(warning = warning, warningIssue = issue) }
+                }
+            }
+        }
+    }
+
+    init {
+        ContextCompat.registerReceiver(
+            appContext, systemReceiver,
+            IntentFilter().apply {
+                addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                addAction(LocationManager.MODE_CHANGED_ACTION)
+            },
+            ContextCompat.RECEIVER_EXPORTED, // system broadcasts
+        )
+    }
 
     /** Start (or restart with a new mode) a continuous scan. Safe to call repeatedly. */
     fun start(scanMode: Int = _status.value.scanMode) {
+        wantScanning = true
         if (activeCallback != null) {
             if (scanMode == _status.value.scanMode) return
             stopInternal()
         }
 
-        val preflight = preflightError()
-        if (preflight != null) {
-            Log.w(TAG, "Cannot start scan: $preflight")
-            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = preflight) }
+        preflight()?.let { (issue, message) ->
+            Log.w(TAG, "Cannot start scan: $message")
+            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = message, errorIssue = issue) }
             return
         }
 
         val scanner = adapter?.bluetoothLeScanner
         if (scanner == null) {
-            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "BLE scanner unavailable") }
+            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "BLE scanner unavailable", errorIssue = ScanIssue.NO_ADAPTER) }
             return
         }
 
@@ -102,24 +148,26 @@ class BleScanner(context: Context) {
             startScanChecked(scanner, buildSettings(scanMode), callback)
         } catch (e: SecurityException) {
             Log.e(TAG, "Missing permission for BLE scan", e)
-            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "Bluetooth scan permission denied") }
+            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "Bluetooth scan permission denied", errorIssue = ScanIssue.PERMISSION_DENIED) }
             return
         } catch (e: IllegalStateException) {
             Log.e(TAG, "Bluetooth adapter not ready", e)
-            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "Bluetooth adapter not ready") }
+            _status.update { it.copy(isScanning = false, scanMode = scanMode, error = "Bluetooth adapter not ready", errorIssue = ScanIssue.BLUETOOTH_OFF) }
             return
         }
 
         activeCallback = callback
+        val (warning, warningIssue) = locationWarning()
         _status.update {
-            it.copy(isScanning = true, scanMode = scanMode, error = null, warning = locationWarning())
+            it.copy(isScanning = true, scanMode = scanMode, error = null, errorIssue = null, warning = warning, warningIssue = warningIssue)
         }
         Log.i(TAG, "Scan started (mode=${modeName(scanMode)})")
     }
 
     fun stop() {
+        wantScanning = false
         stopInternal()
-        _status.update { it.copy(isScanning = false) }
+        _status.update { it.copy(isScanning = false, error = null, errorIssue = null) }
         Log.i(TAG, "Scan stopped")
     }
 
@@ -139,7 +187,7 @@ class BleScanner(context: Context) {
     // Internals
     // ------------------------------------------------------------------
 
-    @SuppressLint("MissingPermission") // caller-side permission check done in preflightError()
+    @SuppressLint("MissingPermission") // caller-side permission check done in preflight()
     private fun startScanChecked(scanner: BluetoothLeScanner, settings: ScanSettings, cb: ScanCallback) {
         // Unfiltered scan on purpose: OUI + name matching cannot be expressed as hardware filters.
         scanner.startScan(null, settings, cb)
@@ -158,17 +206,17 @@ class BleScanner(context: Context) {
         }
     }
 
-    private fun preflightError(): String? {
-        if (!Permissions.allEssentialGranted(appContext)) return "Bluetooth/location permissions not granted"
-        val a = adapter ?: return "This device has no Bluetooth adapter"
-        if (!a.isEnabled) return "Bluetooth is turned off"
+    private fun preflight(): Pair<ScanIssue, String>? {
+        if (!Permissions.allEssentialGranted(appContext)) return ScanIssue.PERMISSION_DENIED to "Bluetooth/location permissions not granted"
+        val a = adapter ?: return ScanIssue.NO_ADAPTER to "This device has no Bluetooth adapter"
+        if (!a.isEnabled) return ScanIssue.BLUETOOTH_OFF to "Bluetooth is turned off"
         return null
     }
 
-    private fun locationWarning(): String? {
-        val lm = appContext.getSystemService(LocationManager::class.java) ?: return null
-        return if (LocationManagerCompat.isLocationEnabled(lm)) null
-        else "Location services are off; Android may withhold BLE scan results"
+    private fun locationWarning(): Pair<String?, ScanIssue?> {
+        val lm = appContext.getSystemService(LocationManager::class.java) ?: return null to null
+        return if (LocationManagerCompat.isLocationEnabled(lm)) null to null
+        else "Location services are off; Android withholds BLE scan results" to ScanIssue.LOCATION_OFF
     }
 
     private fun buildSettings(scanMode: Int): ScanSettings {
@@ -202,7 +250,7 @@ class BleScanner(context: Context) {
             }
             Log.e(TAG, "Scan failed: $reason")
             activeCallback = null
-            _status.update { it.copy(isScanning = false, error = "Scan failed: $reason") }
+            _status.update { it.copy(isScanning = false, error = "Scan failed: $reason", errorIssue = ScanIssue.SCAN_FAILED) }
         }
     }
 

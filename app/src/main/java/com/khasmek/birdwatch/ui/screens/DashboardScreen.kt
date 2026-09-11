@@ -1,9 +1,17 @@
 package com.khasmek.birdwatch.ui.screens
 
+import android.bluetooth.BluetoothAdapter
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -20,11 +29,13 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,10 +53,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.R
+import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.DeviceCard
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
 import com.khasmek.birdwatch.ui.components.StatsBar
+import com.khasmek.birdwatch.ui.components.categoryIcon
+import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.usb.UsbStatus
 import com.khasmek.birdwatch.util.TimeFormat
 import kotlinx.coroutines.delay
@@ -154,25 +168,27 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
             )
 
             if (state.messages.isNotEmpty()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                    state.messages.forEach { m ->
-                        Text(
-                            text = m.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (m.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
-                        )
-                    }
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    state.messages.forEach { m -> StatusMessageRow(m) { runStatusAction(context, it) } }
                 }
             }
 
-            if (state.devices.isEmpty()) {
-                EmptyState(isActive = state.isActive, usbConnected = state.usb.isConnected)
-            } else {
-                LazyColumn(
+            if (state.showFilter) {
+                CategoryFilterRow(
+                    categories = state.presentCategories,
+                    selected = state.filter,
+                    onSelect = viewModel::setFilter,
+                )
+            }
+
+            when {
+                state.devices.isEmpty() -> EmptyState(isActive = state.isActive, summary = state.listeningSummary)
+                state.visibleDevices.isEmpty() -> EmptyFilterState(state.filter!!) { viewModel.setFilter(null) }
+                else -> LazyColumn(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(state.devices, key = { it.macAddress }) { device ->
+                    items(state.visibleDevices, key = { it.macAddress }) { device ->
                         DeviceCard(device = device, now = now)
                     }
                 }
@@ -182,7 +198,75 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
 }
 
 @Composable
-private fun EmptyState(isActive: Boolean, usbConnected: Boolean) {
+private fun StatusMessageRow(message: StatusMessage, onAction: (StatusAction) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = message.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (message.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f),
+        )
+        message.action?.let { action ->
+            TextButton(onClick = { onAction(action) }, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                Text(action.label, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+/** Open the system UI that fixes the reported problem. Falls back to the settings page if a dialog is refused. */
+private fun runStatusAction(context: Context, action: StatusAction) {
+    val intent = when (action) {
+        StatusAction.ENABLE_BLUETOOTH -> Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        StatusAction.LOCATION_SETTINGS -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+        StatusAction.WIFI_SETTINGS ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Intent(Settings.Panel.ACTION_WIFI)
+            else Intent(Settings.ACTION_WIFI_SETTINGS)
+        StatusAction.APP_SETTINGS ->
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        // e.g. BLUETOOTH_CONNECT missing for the enable dialog: send them to Bluetooth settings instead.
+        val fallback = when (action) {
+            StatusAction.ENABLE_BLUETOOTH -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+            StatusAction.WIFI_SETTINGS -> Intent(Settings.ACTION_WIFI_SETTINGS)
+            else -> Intent(Settings.ACTION_SETTINGS)
+        }
+        runCatching { context.startActivity(fallback) }
+    }
+}
+
+@Composable
+private fun CategoryFilterRow(
+    categories: List<DeviceCategory>,
+    selected: DeviceCategory?,
+    onSelect: (DeviceCategory?) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("All") })
+        categories.forEach { c ->
+            FilterChip(
+                selected = selected == c,
+                onClick = { onSelect(if (selected == c) null else c) },
+                label = { Text(c.shortLabel) },
+                leadingIcon = {
+                    Icon(categoryIcon(c), contentDescription = null, tint = DetectionColors.forCategory(c), modifier = Modifier.height(16.dp))
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(isActive: Boolean, summary: String) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -196,14 +280,25 @@ private fun EmptyState(isActive: Boolean, usbConnected: Boolean) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = when {
-                !isActive -> "Press Start scan to begin a session. Detections are GPS-tagged and saved automatically."
-                usbConnected -> "Phone BLE and the ESP32 are both scanning. Flock cameras and Ravens will appear here."
-                else -> "Phone BLE is scanning for Ravens. Plug in the ESP32 over USB to detect Flock cameras."
-            },
+            text = if (isActive) summary
+            else "Press Start scan to begin a session. Detections are GPS-tagged and saved automatically.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+@Composable
+private fun EmptyFilterState(filter: DeviceCategory, onClear: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text("No ${filter.label.lowercase()} detections", style = MaterialTheme.typography.bodyLarge)
+        TextButton(onClick = onClear) { Text("Show all") }
     }
 }
