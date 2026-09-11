@@ -1,14 +1,17 @@
-# CLAUDE.md — Flock You Companion (Android)
+# CLAUDE.md — BirdWatch (Android)
 
 ## Project Goal
 
-**Flock You Companion** is a native Android app (Kotlin, Jetpack Compose) that is a phone-native
-replacement for the [flock-you](https://github.com/colonelpanichacks/flock-you) Flask dashboard.
-The name is deliberate: the phone is the *companion* to an ESP32 that does the camera sniffing.
-The user-facing label lives in `res/values/strings.xml` (`app_name`); the `applicationId`
-stays `com.khasmek.flockyou` and must not change (it is the install identity). It detects Flock Safety
-surveillance cameras and SoundThinking/ShotSpotter Raven gunshot detectors and GPS-tags every hit
-for wardriving.
+**BirdWatch** is a native Android app (Kotlin, Jetpack Compose) for spotting surveillance
+hardware while wardriving. It began as a phone-native replacement for the
+[flock-you](https://github.com/colonelpanichacks/flock-you) Flask dashboard (an ESP32 does the
+Flock camera sniffing; the phone adds GPS, storage, map, export) and grew opt-in "signature
+packs" for other hardware (Raven gunshot detectors, Axon body cams, Meta glasses, drones incl.
+Remote ID). Name history: "Flock You" -> "Flock You Companion" -> **BirdWatch** (2026-09-11,
+when the packs made the Flock-only name misleading). The user-facing label lives in
+`res/values/strings.xml` (`app_name`). `applicationId` and Kotlin package are
+`com.khasmek.birdwatch`; they were changed once (from `com.khasmek.flockyou`) while the app was
+only on the dev phone and must not change again once anyone else has it installed.
 
 The app has **two detection sources** feeding one data model:
 
@@ -57,7 +60,7 @@ phone's `WifiManager` scan for camera detection (it only sees APs, which cameras
 - **Maps:** maps-compose + play-services-maps, user-provided API key at runtime (see below).
 - **Export:** JSON, CSV, KML via FileProvider + share sheet.
 - **Audio:** SoundPool / ToneGenerator, built-in tones, no asset files.
-- **DI:** manual, via `AppContainer` in `FlockYouApp.kt`. No Hilt.
+- **DI:** manual, via `AppContainer` in `BirdWatchApp.kt`. No Hilt.
 - **Async:** coroutines + Flow everywhere. No callbacks leak past the radio wrappers, no RxJava.
 - **Build:** Gradle Kotlin DSL, AGP 9.2.1 with built-in Kotlin 2.2.
 
@@ -71,11 +74,11 @@ If Kotlin/AGP is bumped later, revisit all three together.
 
 ## Package layout
 
-Namespace is `com.khasmek.flockyou` (from the Android Studio template), not `com.flockyou`.
+Namespace, `applicationId` and Kotlin package are all `com.khasmek.birdwatch`.
 
 ```
-app/src/main/java/com/khasmek/flockyou/
-├── FlockYouApp.kt                 # Application + AppContainer (manual DI, appScope)
+app/src/main/java/com/khasmek/birdwatch/
+├── BirdWatchApp.kt                 # Application + AppContainer (manual DI, appScope)
 ├── MainActivity.kt                # Single activity; PermissionGate -> AppNavigation
 ├── detection/
 │   ├── DetectionSignatures.kt     # All OUIs, names, mfr IDs, Raven UUIDs (pure Kotlin)

@@ -27,5 +27,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Flock You Companion"
+rootProject.name = "BirdWatch"
 include(":app")

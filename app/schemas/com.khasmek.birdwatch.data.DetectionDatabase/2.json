@@ -1,0 +1,211 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "ba523be05a5f7044200b18d6851f3ec5",
+    "entities": [
+      {
+        "tableName": "detected_devices",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sessionId` TEXT NOT NULL, `macAddress` TEXT NOT NULL, `source` TEXT NOT NULL, `deviceName` TEXT, `detectionMethod` TEXT NOT NULL, `deviceType` TEXT NOT NULL, `confidence` TEXT NOT NULL, `matchedOn` TEXT NOT NULL, `ravenFirmware` TEXT, `tier` INTEGER, `channel` INTEGER, `rssi` INTEGER NOT NULL, `latitude` REAL, `longitude` REAL, `accuracyMeters` REAL, `firstSeen` INTEGER NOT NULL, `lastSeen` INTEGER NOT NULL, `sightings` INTEGER NOT NULL, `uasId` TEXT, `operatorId` TEXT, `targetLatitude` REAL, `targetLongitude` REAL, `targetAltitudeM` REAL, `operatorLatitude` REAL, `operatorLongitude` REAL, PRIMARY KEY(`sessionId`, `macAddress`))",
+        "fields": [
+          {
+            "fieldPath": "sessionId",
+            "columnName": "sessionId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "macAddress",
+            "columnName": "macAddress",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceName",
+            "columnName": "deviceName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "detectionMethod",
+            "columnName": "detectionMethod",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deviceType",
+            "columnName": "deviceType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "matchedOn",
+            "columnName": "matchedOn",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ravenFirmware",
+            "columnName": "ravenFirmware",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "tier",
+            "columnName": "tier",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "rssi",
+            "columnName": "rssi",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "accuracyMeters",
+            "columnName": "accuracyMeters",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "firstSeen",
+            "columnName": "firstSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSeen",
+            "columnName": "lastSeen",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sightings",
+            "columnName": "sightings",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uasId",
+            "columnName": "uasId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "operatorId",
+            "columnName": "operatorId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "targetLatitude",
+            "columnName": "targetLatitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "targetLongitude",
+            "columnName": "targetLongitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "targetAltitudeM",
+            "columnName": "targetAltitudeM",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "operatorLatitude",
+            "columnName": "operatorLatitude",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "operatorLongitude",
+            "columnName": "operatorLongitude",
+            "affinity": "REAL"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sessionId",
+            "macAddress"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_detected_devices_sessionId",
+            "unique": false,
+            "columnNames": [
+              "sessionId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_detected_devices_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_detected_devices_lastSeen",
+            "unique": false,
+            "columnNames": [
+              "lastSeen"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_detected_devices_lastSeen` ON `${TABLE_NAME}` (`lastSeen`)"
+          }
+        ]
+      },
+      {
+        "tableName": "scan_sessions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `startedAt` INTEGER NOT NULL, `endedAt` INTEGER, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAt",
+            "columnName": "endedAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ba523be05a5f7044200b18d6851f3ec5')"
+    ]
+  }
+}

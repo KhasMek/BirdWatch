@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.khasmek.flockyou"
+    namespace = "com.khasmek.birdwatch"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.khasmek.flockyou"
+        applicationId = "com.khasmek.birdwatch"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
