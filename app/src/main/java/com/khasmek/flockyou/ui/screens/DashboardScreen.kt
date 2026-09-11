@@ -149,6 +149,8 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                 gpsTracking = state.location.isTracking,
                 gpsAccuracyMeters = state.location.fix?.accuracyMeters,
                 usbStatus = state.usb.status,
+                wifiApScanning = if (state.wifiApEnabled) state.wifi.isScanning else null,
+                wifiApCount = state.wifi.lastResultCount,
             )
 
             if (state.messages.isNotEmpty()) {

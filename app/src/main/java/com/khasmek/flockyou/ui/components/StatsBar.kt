@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.GpsOff
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.UsbOff
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -49,6 +51,9 @@ fun StatsBar(
     gpsTracking: Boolean,
     gpsAccuracyMeters: Float?,
     usbStatus: UsbStatus,
+    /** Null hides the indicator (WiFi AP scan switched off in Settings). */
+    wifiApScanning: Boolean?,
+    wifiApCount: Int,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -107,6 +112,14 @@ fun StatsBar(
                     detail = null,
                     active = usbStatus == UsbStatus.CONNECTED,
                 )
+                if (wifiApScanning != null) {
+                    StatusStat(
+                        icon = if (wifiApScanning) Icons.Default.Wifi else Icons.Default.WifiOff,
+                        label = if (wifiApScanning) "WiFi APs" else "WiFi idle",
+                        detail = if (wifiApScanning) "$wifiApCount seen" else null,
+                        active = wifiApScanning,
+                    )
+                }
             }
         }
     }

@@ -9,6 +9,8 @@ enum class DetectionSource(val label: String) {
     BLE("Phone BLE"),
     /** A XIAO ESP32-S3 running the flock-you WiFi promiscuous firmware, attached over USB serial. */
     ESP32_WIFI("ESP32 WiFi"),
+    /** The phone's own WiFi radio scanning visible access points (BSSID OUI matching). */
+    PHONE_WIFI("Phone WiFi"),
 }
 
 /**

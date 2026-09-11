@@ -38,6 +38,9 @@ enum class DetectionMethod(val wireName: String, val label: String) {
     BLE_SERVICE_UUID("ble_service_uuid", "BLE service UUID"),
     BLE_COMPOSITE("ble_composite", "BLE company ID + service"),
 
+    // Phone WiFi access-point scan (phase 9b): the AP's BSSID carries the vendor OUI
+    WIFI_AP_OUI("wifi_ap_oui", "WiFi AP OUI"),
+
     // ESP32 WiFi promiscuous firmware, by confidence tier (4 = highest)
     WIFI_WILDCARD_PROBE_IE_SIG("wifi_wildcard_probe_ie_sig", "Probe + IE fingerprint"),
     WIFI_WILDCARD_PROBE("wifi_wildcard_probe", "Wildcard probe"),
@@ -72,7 +75,13 @@ enum class DeviceType(val label: String, val category: DeviceCategory) {
     SOUNDTHINKING("SoundThinking", DeviceCategory.GUNSHOT_DETECTOR),
     RAVEN("Raven", DeviceCategory.GUNSHOT_DETECTOR),
     AXON("Axon", DeviceCategory.LAW_ENFORCEMENT),
-    META_GLASSES("Meta glasses", DeviceCategory.WEARABLE_CAMERA);
+    WATCHGUARD("WatchGuard", DeviceCategory.LAW_ENFORCEMENT),
+    DIGITAL_ALLY("Digital Ally", DeviceCategory.LAW_ENFORCEMENT),
+    UTILITY_INC("Utility Inc.", DeviceCategory.LAW_ENFORCEMENT),
+    META_GLASSES("Meta glasses", DeviceCategory.WEARABLE_CAMERA),
+    DJI("DJI", DeviceCategory.DRONE),
+    PARROT("Parrot", DeviceCategory.DRONE),
+    SKYDIO("Skydio", DeviceCategory.DRONE);
 
     val isCore: Boolean get() = category == DeviceCategory.FLOCK_ALPR || category == DeviceCategory.GUNSHOT_DETECTOR
 }
@@ -184,9 +193,37 @@ object DeviceClassifier {
         return null
     }
 
+    /**
+     * Classify a WiFi access point seen by the phone's own WiFi scan. Only the BSSID's OUI is
+     * usable: Core Flock / SoundThinking prefixes first, then WiFi-scoped OUI signatures from the
+     * enabled packs. SSID is carried through as the device name but never matched (no vendor has a
+     * confirmed fixed SSID pattern yet; see docs/SIGNATURES.md).
+     */
+    fun classifyWifiAp(bssid: String, enabledPacks: Set<PackId> = emptySet()): Classification? {
+        val prefix = macPrefix(bssid)
+        if (prefix in DetectionSignatures.FLOCK_MAC_PREFIXES || prefix in DetectionSignatures.FLOCK_MAC_PREFIXES_2026) {
+            return Classification(DetectionMethod.WIFI_AP_OUI, DeviceType.FLOCK, Confidence.HIGH, prefix)
+        }
+        if (prefix in DetectionSignatures.SOUNDTHINKING_MAC_PREFIXES) {
+            return Classification(DetectionMethod.WIFI_AP_OUI, DeviceType.SOUNDTHINKING, Confidence.HIGH, prefix)
+        }
+        if (prefix in DetectionSignatures.FLOCK_CONTRACT_MFR_MAC_PREFIXES) {
+            return Classification(DetectionMethod.WIFI_AP_OUI, DeviceType.FLOCK, Confidence.LOW, prefix)
+        }
+        for (pack in SignaturePacks.OPTIONAL) {
+            if (pack.id !in enabledPacks) continue
+            for (sig in pack.signatures) {
+                if (sig is Signature.Oui && Radio.WIFI in sig.radios && sig.prefix == prefix) {
+                    return Classification(DetectionMethod.WIFI_AP_OUI, sig.vendor, sig.confidence, sig.prefix, pack = pack.id)
+                }
+            }
+        }
+        return null
+    }
+
     private fun match(sig: Signature, adv: BleAdvertisement, prefix: String, uuids: Set<String>): Classification? = when (sig) {
         is Signature.Oui ->
-            if (prefix == sig.prefix) Classification(DetectionMethod.MAC_PREFIX, sig.vendor, sig.confidence, sig.prefix) else null
+            if (Radio.BLE in sig.radios && prefix == sig.prefix) Classification(DetectionMethod.MAC_PREFIX, sig.vendor, sig.confidence, sig.prefix) else null
         is Signature.CompanyId ->
             if (sig.id in adv.manufacturerIds) Classification(DetectionMethod.BLE_COMPANY_ID, sig.vendor, sig.confidence, hex16(sig.id)) else null
         is Signature.ServiceUuid16 ->

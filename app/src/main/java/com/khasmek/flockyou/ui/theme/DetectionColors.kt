@@ -14,6 +14,7 @@ object DetectionColors {
     val Drone = Color(0xFF546E7A)          // blue-grey
     val Ble = Color(0xFF1565C0)
     val Esp32 = Color(0xFF2E7D32)
+    val PhoneWifi = Color(0xFF6D4C41)
     val OnAccent = Color.White
 
     fun forCategory(category: DeviceCategory): Color = when (category) {
@@ -29,5 +30,6 @@ object DetectionColors {
     fun forSource(source: DetectionSource): Color = when (source) {
         DetectionSource.BLE -> Ble
         DetectionSource.ESP32_WIFI -> Esp32
+        DetectionSource.PHONE_WIFI -> PhoneWifi
     }
 }

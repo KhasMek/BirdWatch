@@ -169,6 +169,15 @@ fun SettingsScreen(
                 checked = state.lowPowerScan,
                 onCheckedChange = viewModel::setLowPowerScan,
             )
+            ToggleRow(
+                title = "Phone WiFi access-point scan",
+                subtitle = "Match the vendor prefix of every WiFi network the phone can see. Needed for in-car " +
+                    "police video systems and drones, which run their own access points. Android limits how " +
+                    "often apps may scan, so results arrive every 15-30 s.",
+                checked = state.wifiApScan,
+                onCheckedChange = viewModel::setWifiApScan,
+                tag = "BETA",
+            )
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
@@ -177,7 +186,7 @@ fun SettingsScreen(
             SectionTitle("Detection packs")
             Text(
                 "Flock cameras and Raven gunshot detectors are always on. These optional packs add other " +
-                    "hardware over the phone's Bluetooth. Their hits are counted under \"Other\", never as Flock or Raven.",
+                    "hardware over the phone's radios. Their hits are counted under \"Other\", never as Flock or Raven.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

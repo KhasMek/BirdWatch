@@ -12,6 +12,7 @@ import com.khasmek.flockyou.detection.PackId
 import com.khasmek.flockyou.detection.ScanStatus
 import com.khasmek.flockyou.location.LocationState
 import com.khasmek.flockyou.usb.UsbState
+import com.khasmek.flockyou.wifi.WifiScanStatus
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -28,6 +29,8 @@ data class DashboardUiState(
     val location: LocationState = LocationState(),
     val audioEnabled: Boolean = true,
     val enabledPacks: Set<PackId> = emptySet(),
+    val wifiApEnabled: Boolean = false,
+    val wifi: WifiScanStatus = WifiScanStatus(),
 ) {
     val isActive: Boolean get() = session != null
     val totalCount: Int get() = devices.size
@@ -43,6 +46,10 @@ data class DashboardUiState(
             scan.error?.let { add(StatusMessage("BLE: $it", isError = true)) }
             scan.warning?.let { add(StatusMessage("BLE: $it", isError = false)) }
             usb.error?.let { add(StatusMessage("USB: $it", isError = true)) }
+            if (wifiApEnabled) {
+                wifi.error?.let { add(StatusMessage("WiFi: $it", isError = true)) }
+                wifi.warning?.let { add(StatusMessage("WiFi: $it", isError = false)) }
+            }
             location.error?.let { add(StatusMessage("GPS: $it", isError = true)) }
         }
 }
@@ -59,11 +66,14 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         container.settings.enabledPacks,
     ) { scan, usb, location, audio, packs -> RadioState(scan, usb, location, audio, packs) }
 
+    private val wifi = combine(container.settings.wifiApScan, container.wifiApScanner.status) { enabled, status -> enabled to status }
+
     val uiState: StateFlow<DashboardUiState> = combine(
         sessionManager.currentSession,
         sessionManager.observeCurrentDevices(),
         radios,
-    ) { session, devices, r ->
+        wifi,
+    ) { session, devices, r, (wifiEnabled, wifiStatus) ->
         DashboardUiState(
             session = session,
             devices = devices,
@@ -72,6 +82,8 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
             location = r.location,
             audioEnabled = r.audio,
             enabledPacks = r.packs,
+            wifiApEnabled = wifiEnabled,
+            wifi = wifiStatus,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 

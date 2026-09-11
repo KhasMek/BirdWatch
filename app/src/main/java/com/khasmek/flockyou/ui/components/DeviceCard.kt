@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.SignalCellularAlt1Bar
 import androidx.compose.material.icons.filled.SignalCellularAlt2Bar
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -167,14 +168,22 @@ private fun SourceTag(source: DetectionSource) {
             .padding(horizontal = 6.dp, vertical = 2.dp),
     ) {
         Icon(
-            imageVector = if (source == DetectionSource.BLE) Icons.Default.Bluetooth else Icons.Default.Usb,
+            imageVector = when (source) {
+                DetectionSource.BLE -> Icons.Default.Bluetooth
+                DetectionSource.ESP32_WIFI -> Icons.Default.Usb
+                DetectionSource.PHONE_WIFI -> Icons.Default.Wifi
+            },
             contentDescription = source.label,
             tint = color,
             modifier = Modifier.size(12.dp),
         )
         Spacer(Modifier.width(3.dp))
         Text(
-            text = if (source == DetectionSource.BLE) "BLE" else "ESP32",
+            text = when (source) {
+                DetectionSource.BLE -> "BLE"
+                DetectionSource.ESP32_WIFI -> "ESP32"
+                DetectionSource.PHONE_WIFI -> "WiFi"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = color,
         )

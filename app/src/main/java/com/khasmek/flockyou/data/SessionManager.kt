@@ -10,6 +10,7 @@ import com.khasmek.flockyou.detection.DetectionTable
 import com.khasmek.flockyou.detection.ScanForegroundService
 import com.khasmek.flockyou.location.LocationProvider
 import com.khasmek.flockyou.usb.UsbCompanion
+import com.khasmek.flockyou.wifi.WifiApScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
@@ -32,9 +33,10 @@ import java.util.UUID
  * Owns the scan-session lifecycle: one UUID per session, start/end timestamps, and persisting
  * detections from every source into Room while a session is running.
  *
- * Starting a session starts GPS updates, the phone BLE scanner and the ESP32 USB companion
- * (which connects if a device is attached, and auto-connects if one is plugged in later).
- * Stopping flushes both in-memory tables, stops the radios and closes the session row.
+ * Starting a session starts GPS updates, the phone BLE scanner, the ESP32 USB companion (which
+ * connects if a device is attached, and auto-connects if one is plugged in later) and, when the
+ * user has switched it on, the phone WiFi access-point scanner. Stopping flushes every in-memory
+ * table, stops the radios and closes the session row.
  *
  * Persistence strategy, per source:
  *  - a brand-new MAC is written immediately (from the table's `newDetections`);
@@ -44,8 +46,10 @@ import java.util.UUID
 class SessionManager(
     context: Context,
     private val db: DetectionDatabase,
+    private val settings: AppSettings,
     private val bleScanner: BleScanner,
     private val usbCompanion: UsbCompanion,
+    private val wifiApScanner: WifiApScanner,
     private val locationProvider: LocationProvider,
     private val scope: CoroutineScope,
 ) {
@@ -62,11 +66,18 @@ class SessionManager(
 
     /** First sighting of every MAC from any source. Drives audio alerts. */
     val newDetections: Flow<DetectedDevice> =
-        merge(bleScanner.table.newDetections, usbCompanion.table.newDetections)
+        merge(bleScanner.table.newDetections, usbCompanion.table.newDetections, wifiApScanner.table.newDetections)
 
     init {
         // Any session left open by a crash/kill is closed now so it shows up in history.
         scope.launch { sessionDao.closeOpenSessions(System.currentTimeMillis()) }
+        // The WiFi AP scan switch takes effect mid-session too.
+        scope.launch {
+            settings.wifiApScan.collect { enabled ->
+                if (!isActive) return@collect
+                if (enabled) wifiApScanner.start() else wifiApScanner.stop()
+            }
+        }
     }
 
     /**
@@ -106,9 +117,14 @@ class SessionManager(
         usbCompanion.locationSource = fixSource
         usbCompanion.wantConnection = true
 
+        wifiApScanner.clear()
+        wifiApScanner.sessionId = session.id
+        wifiApScanner.locationSource = fixSource
+
         locationProvider.start()
         bleScanner.start(scanMode)
         usbCompanion.connect()
+        if (settings.wifiApScan.value) wifiApScanner.start()
 
         persistJob = scope.launch { persistLoop() }
         _currentSession.value = session
@@ -122,12 +138,13 @@ class SessionManager(
         bleScanner.stop()
         usbCompanion.wantConnection = false
         usbCompanion.disconnect()
+        wifiApScanner.stop()
         locationProvider.stop()
         persistJob?.cancel()
         persistJob = null
 
         // Final flush so the last few re-sightings land in the database.
-        val snapshot = bleScanner.table.snapshot() + usbCompanion.table.snapshot()
+        val snapshot = bleScanner.table.snapshot() + usbCompanion.table.snapshot() + wifiApScanner.table.snapshot()
         if (snapshot.isNotEmpty()) detectionDao.upsertAll(snapshot)
 
         sessionDao.update(session.copy(endedAt = System.currentTimeMillis()))
@@ -168,6 +185,7 @@ class SessionManager(
     private suspend fun persistLoop() = coroutineScope {
         launch { persist(bleScanner.table) }
         launch { persist(usbCompanion.table) }
+        launch { persist(wifiApScanner.table) }
     }
 
     @OptIn(FlowPreview::class)

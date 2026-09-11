@@ -28,6 +28,10 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- Phone WiFi access-point scan (optional third detection source). Both are install-time. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+
     <!-- Foreground service for continuous background scanning. The `location` type is what lets
          the fused provider keep delivering GPS fixes while the app UI is in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

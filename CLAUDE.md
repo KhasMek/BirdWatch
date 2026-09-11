@@ -235,8 +235,14 @@ All eight phases are complete. Remaining hardware validation: live ESP32 USB ser
      first then enabled packs; `DeviceType` gained a `category`; Settings has per-pack switches
      with a BETA tag and an About & credits list; stats/sessions show an "Other" count; exports
      carry `category`. Ships Axon (LE pack) and Meta glasses (wearables pack) on phone BLE.
-   - 9b — planned: phone WiFi AP scan source for WiFi-only OUIs (WatchGuard, Digital Ally,
-     Utility; DJI, Parrot, Skydio).
+   - 9b — **done**: `wifi/WifiApScanner.kt` is a third `DetectionSource` (`PHONE_WIFI`). It
+     listens for the system's own scan results and requests one every 35 s (Android throttle:
+     4 per 2 min foreground). `DeviceClassifier.classifyWifiAp(bssid, packs)` matches Core OUIs
+     then WiFi-scoped pack OUIs (`Signature.Oui.radios`). Adds the Drones pack (DJI, Parrot,
+     Skydio) and the WiFi-only LE vendors (WatchGuard, Digital Ally, Utility). Separate
+     "Phone WiFi access-point scan" switch in Settings, off by default; needs
+     ACCESS_WIFI_STATE + CHANGE_WIFI_STATE. Rooted tip: `settings put global
+     wifi_scan_throttle_enabled 0`.
    - 9c — stretch: BLE Remote ID (ASTM F3411) decoding.
 
 Work one phase at a time; stop after each for review. The user runs all git commands; suggest

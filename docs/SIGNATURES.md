@@ -21,14 +21,18 @@ behaviour stays "Flock cameras and Ravens", matching its name.
 |---|---|---|---|---|
 | Core: Flock Safety | ALPR / fixed surveillance | on | ESP32 WiFi (primary), phone BLE (legacy names/OUIs/mfr ID) | shipped |
 | Core: SoundThinking / Raven | Gunshot detector | on | phone BLE (service UUIDs, OUI) | shipped |
-| Law-enforcement equipment | Body cams, in-car video | off | phone BLE (Axon); phone WiFi AP scan (WatchGuard, Digital Ally, Utility) | **shipped (beta)** for Axon BLE; WiFi OUIs planned (9b) |
+| Law-enforcement equipment | Body cams, in-car video | off | phone BLE (Axon); phone WiFi AP scan (WatchGuard, Digital Ally, Utility) | **shipped (beta)** |
 | Wearable cameras | Smart glasses | off | phone BLE (Meta composite) | **shipped (beta)** |
+| Drones | Consumer / commercial UAS | off | phone WiFi AP scan (OUIs); phone BLE Remote ID (stretch) | **shipped (beta)** for OUIs; Remote ID planned (9c) |
+| Consumer doorbells / cameras | Ring | off | phone WiFi AP scan | deferred (see §4) |
 
 "Beta" in the app means: identifiers are attributed to the vendor by registry or published
 research, but nobody has yet confirmed on real, worn/active hardware how often the device
 advertises them. Expect false negatives, not false positives.
-| Drones | Consumer / commercial UAS | off | phone WiFi AP scan (OUIs); phone BLE Remote ID (stretch) | planned (9b, 9c) |
-| Consumer doorbells / cameras | Ring | off | phone WiFi AP scan | deferred (see §4) |
+
+The phone WiFi AP scan is a separate switch in Settings (off by default). While it is on, Core
+Flock and SoundThinking OUIs are also matched against AP BSSIDs; Flock cameras no longer run an
+AP, so this is a legacy safety net, not the primary Flock path (that is the ESP32).
 
 ---
 

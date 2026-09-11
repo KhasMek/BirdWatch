@@ -11,6 +11,7 @@ import com.khasmek.flockyou.data.SessionManager
 import com.khasmek.flockyou.detection.BleScanner
 import com.khasmek.flockyou.location.LocationProvider
 import com.khasmek.flockyou.usb.UsbCompanion
+import com.khasmek.flockyou.wifi.WifiApScanner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,9 +32,10 @@ class AppContainer(context: Context) {
     val database: DetectionDatabase by lazy { DetectionDatabase.build(appContext) }
     val bleScanner: BleScanner by lazy { BleScanner(appContext) }
     val usbCompanion: UsbCompanion by lazy { UsbCompanion(appContext, appScope) }
+    val wifiApScanner: WifiApScanner by lazy { WifiApScanner(appContext, appScope) }
     val locationProvider: LocationProvider by lazy { LocationProvider(appContext) }
     val sessionManager: SessionManager by lazy {
-        SessionManager(appContext, database, bleScanner, usbCompanion, locationProvider, appScope)
+        SessionManager(appContext, database, settings, bleScanner, usbCompanion, wifiApScanner, locationProvider, appScope)
     }
     val alertSounds: AlertSounds by lazy { AlertSounds(appContext, settings) }
     val exportManager: ExportManager by lazy { ExportManager(appContext, database) }
@@ -50,9 +52,12 @@ class FlockYouApp : Application() {
         container = AppContainer(this)
         // Audio alerts follow every session regardless of which screen is open.
         container.alertSounds.start(container.sessionManager.newDetections, container.appScope)
-        // Signature-pack toggles apply to the scanner immediately, mid-session included.
+        // Signature-pack toggles apply to both phone radios immediately, mid-session included.
         container.appScope.launch {
-            container.settings.enabledPacks.collect { container.bleScanner.enabledPacks = it }
+            container.settings.enabledPacks.collect {
+                container.bleScanner.enabledPacks = it
+                container.wifiApScanner.enabledPacks = it
+            }
         }
     }
 

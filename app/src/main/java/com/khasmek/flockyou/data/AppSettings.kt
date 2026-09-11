@@ -28,6 +28,10 @@ class AppSettings(context: Context) {
     /** Opt-in signature packs currently switched on. Core (Flock + Raven) is always on. */
     val enabledPacks: StateFlow<Set<PackId>> = _enabledPacks.asStateFlow()
 
+    private val _wifiApScan = MutableStateFlow(prefs.getBoolean(KEY_WIFI_AP, false))
+    /** Use the phone's WiFi radio to match access-point BSSIDs (third detection source). */
+    val wifiApScan: StateFlow<Boolean> = _wifiApScan.asStateFlow()
+
     val scanMode: Int
         get() = if (_lowPowerScan.value) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
 
@@ -39,6 +43,11 @@ class AppSettings(context: Context) {
     fun setLowPowerScan(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_LOW_POWER, enabled) }
         _lowPowerScan.value = enabled
+    }
+
+    fun setWifiApScan(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_WIFI_AP, enabled) }
+        _wifiApScan.value = enabled
     }
 
     fun setPackEnabled(pack: PackId, enabled: Boolean) {
@@ -58,5 +67,6 @@ class AppSettings(context: Context) {
         const val KEY_AUDIO = "audio_alerts"
         const val KEY_LOW_POWER = "low_power_scan"
         const val KEY_PACKS = "enabled_packs"
+        const val KEY_WIFI_AP = "wifi_ap_scan"
     }
 }

@@ -23,6 +23,7 @@ data class SettingsUiState(
     /** A different key is already in use by the Maps SDK; the new one applies after restart. */
     val restartRequired: Boolean = false,
     val enabledPacks: Set<PackId> = emptySet(),
+    val wifiApScan: Boolean = false,
 ) {
     val hasKey: Boolean get() = !mapsApiKey.isNullOrBlank()
     val keyHint: String? get() = mapsApiKey?.let { "…" + it.takeLast(4) }
@@ -55,7 +56,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             restartRequired = key != null && MapsKeyInjector.needsRestartFor(key),
             enabledPacks = packs,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
+    }.combine(settings.wifiApScan) { s, wifi -> s.copy(wifiApScan = wifi) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     /** Validate format and persist. Returns the outcome for the screen to toast. */
     fun saveMapsApiKey(input: String, onResult: (SaveResult) -> Unit) {
@@ -78,6 +80,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setAudioAlerts(enabled: Boolean) = settings.setAudioAlerts(enabled)
     fun setLowPowerScan(enabled: Boolean) = settings.setLowPowerScan(enabled)
     fun setPackEnabled(pack: PackId, enabled: Boolean) = settings.setPackEnabled(pack, enabled)
+    fun setWifiApScan(enabled: Boolean) = settings.setWifiApScan(enabled)
     fun playTestChirp() = container.alertSounds.playTest()
 
     companion object {
