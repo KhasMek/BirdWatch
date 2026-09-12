@@ -65,9 +65,8 @@ jobs:
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
 
-      - name: Run unit tests
-        run: ./gradlew testDebugUnitTest
-
+      # The signing config is read from the environment when Gradle configures the build, so
+      # every Gradle call in this job must carry these variables. Tests run in the same call.
       - name: Build signed release APK
         env:
           BIRDWATCH_VERSION: ${{ env.RELEASE_TAG }}
@@ -75,7 +74,22 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: ./gradlew assembleRelease
+        run: ./gradlew testDebugUnitTest assembleRelease
+
+      # Belt and braces: refuse to publish anything signed with an Android debug certificate.
+      # NOTE: `keytool -printcert -jarfile` cannot read APK v2/v3 signatures ("Not a signed jar
+      # file"); apksigner from the SDK build-tools is the right tool.
+      - name: Verify release signature
+        run: |
+          # Newest build-tools directory that actually contains apksigner.
+          APKSIGNER="$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
+          echo "APKSIGNER=$APKSIGNER" >> "$GITHUB_ENV"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk > cert.txt
+          cat cert.txt
+          if grep -q "Android Debug" cert.txt; then
+            echo "::error::APK is signed with a debug certificate; release signing did not apply"
+            exit 1
+          fi
 
       - name: Collect artifacts
         run: |
@@ -88,7 +102,10 @@ jobs:
       # every release. The generated release notes are appended below this body.
       - name: Write release notes header
         run: |
-          SHA1=$(keytool -printcert -jarfile "BirdWatch-$RELEASE_TAG.apk" | awk '/SHA1:/ {print $2; exit}')
+          # apksigner prints the digest as lowercase hex without separators; format it the way the
+          # Google Cloud Console expects (AA:BB:CC:...).
+          SHA1=$("$APKSIGNER" verify --print-certs "BirdWatch-$RELEASE_TAG.apk" \
+            | awk '/SHA-1 digest:/ {print toupper($NF); exit}' | sed 's/../&:/g; s/:$//')
           SHA256_APK=$(cut -d' ' -f1 "BirdWatch-$RELEASE_TAG.apk.sha256")
           {
             echo "**Install:** download \`BirdWatch-$RELEASE_TAG.apk\` and sideload it. Package \`com.khasmek.birdwatch\`."

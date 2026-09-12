@@ -41,6 +41,14 @@ val keystoreProps = Properties().apply {
 fun signingValue(env: String, prop: String): String? = System.getenv(env) ?: keystoreProps.getProperty(prop)
 val releaseStoreFile: String? = signingValue("ANDROID_KEYSTORE_FILE", "storeFile")
 
+// A versioned build is a real release: never let it fall back to the debug key silently.
+if (requestedVersion != null && releaseStoreFile == null) {
+    throw GradleException(
+        "BIRDWATCH_VERSION=$requestedVersion requested but no release keystore is configured " +
+            "(set ANDROID_KEYSTORE_FILE/… or add keystore.properties). Refusing to debug-sign a release."
+    )
+}
+
 android {
     namespace = "com.khasmek.birdwatch"
     compileSdk {

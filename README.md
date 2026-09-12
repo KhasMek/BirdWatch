@@ -116,10 +116,11 @@ works without it.
 **Finding the SHA-1 fingerprint**
 
 - *Installed from the Releases page:* every release is signed with the project's release
-  certificate. Its SHA-1 is published in the release notes, or read it straight from the APK you
-  downloaded:
+  certificate, and its SHA-1 is printed at the top of each release's notes. To read it from the
+  APK yourself you need `apksigner` from the Android SDK build-tools (`keytool` cannot read APK
+  signatures):
   ```bash
-  keytool -printcert -jarfile BirdWatch-2026.09.1.apk | grep SHA1
+  apksigner verify --print-certs BirdWatch-2026.09.1.apk | grep "SHA-1"
   ```
 - *Built from source yourself:* debug builds are signed with your machine's debug key:
   ```bash
