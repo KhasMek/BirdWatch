@@ -85,6 +85,59 @@ build downloads dependencies.
    The dashboard's status row shows **ESP32 on** when the link is up.
 3. Press **Start scan**. That's it.
 
+### 4. Optional: a Google Maps API key for the Map tab
+
+The map uses Google's Maps SDK, which needs an API key tied to your own Google account. BirdWatch
+does not ship one, so nobody else's quota or billing is involved and the key never leaves your
+phone (it is stored encrypted and injected into the map at runtime). Everything except the Map tab
+works without it.
+
+**Create the key**
+
+1. Open the [Google Cloud Console](https://console.cloud.google.com/) and create a project (any
+   name, e.g. "BirdWatch"). Google requires a billing account on the project even for free use;
+   the Maps SDK for Android includes a monthly free allowance that a personal wardriving app will
+   not come close to using, and you can set a budget alert to be sure.
+2. Go to **APIs & Services → Library**, search for **Maps SDK for Android**, and click **Enable**.
+   Only this one API is needed.
+3. Go to **APIs & Services → Credentials → Create credentials → API key**. Copy the key; it starts
+   with `AIza` and is 39 characters long.
+
+**Lock the key to BirdWatch** (do this; an unrestricted key can be used by anyone who extracts it)
+
+4. On the key's edit page, under **Application restrictions**, choose **Android apps** and add an
+   item with:
+   - **Package name:** `com.khasmek.birdwatch`
+   - **SHA-1 certificate fingerprint:** the fingerprint of the certificate that signed *your*
+     installed copy. See below for how to find it.
+5. Under **API restrictions**, choose **Restrict key** and tick only **Maps SDK for Android**.
+6. Save. Restrictions can take a few minutes to apply.
+
+**Finding the SHA-1 fingerprint**
+
+- *Installed from the Releases page:* every release is signed with the project's release
+  certificate. Its SHA-1 is published in the release notes, or read it straight from the APK you
+  downloaded:
+  ```bash
+  keytool -printcert -jarfile BirdWatch-2026.09.1.apk | grep SHA1
+  ```
+- *Built from source yourself:* debug builds are signed with your machine's debug key:
+  ```bash
+  keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey \
+    -storepass android -keypass android | grep SHA1
+  ```
+  If you also make signed release builds, add their certificate's SHA-1 as a second entry on
+  the same key. One key can list several package/fingerprint pairs.
+
+**Enter it in the app**
+
+7. Settings → *Google Maps* → paste the key → **Save key**, then open the Map tab. Streets and
+   labels mean it works. A blank grey map with only the Google logo means the key is wrong, the
+   Maps SDK for Android isn't enabled, or the package/fingerprint restriction doesn't match the
+   copy you installed. Google's own guide is at
+   [Get an API key](https://developers.google.com/maps/documentation/android-sdk/get-api-key).
+8. If you ever replace the key, restart the app; the Maps SDK caches the first key it reads.
+
 ## Using it
 
 **Dashboard.** Live list of everything detected this session: type badge, name or hardware
@@ -103,8 +156,8 @@ for drone vendor prefixes, which show up as WiFi access points. Android limits h
 scan, so results refresh every 15 to 30 seconds. On a rooted phone,
 `adb shell settings put global wifi_scan_throttle_enabled 0` removes the limit.
 
-**Map.** Enter your Google Maps API key in Settings once (stored encrypted on the device, never in
-the app's code). Markers are coloured by category. Remote ID drones appear at their self-reported
+**Map.** Needs your own Google Maps API key; see [step 4](#4-optional-a-google-maps-api-key-for-the-map-tab)
+above for creating one and locking it to this app. Markers are coloured by category. Remote ID drones appear at their self-reported
 position with a second marker for the operator and a dashed line between them. Switch between
 the current session and all sessions with the chips above the map.
 
