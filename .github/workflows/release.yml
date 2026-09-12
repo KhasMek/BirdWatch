@@ -1,11 +1,14 @@
 name: Release build
 
-# Runs when a rolling date-version tag is pushed (YYYY.MM.N, e.g. 2026.09.1), or by hand with the
-# tag name as input. Builds a signed, minified release APK, then publishes a GitHub Release for
-# that tag with the APK attached as BirdWatch-<tag>.apk and the R8 mapping file alongside it.
+# Two ways to release, both using rolling date versions (YYYY.MM.N, e.g. 2026.09.1):
 #
-#   git tag 2026.09.1 && git push origin 2026.09.1
+#   1. Run this workflow by hand from the Actions tab with the new version as input. It builds
+#      the commit of the branch you launched it from and the release step CREATES the tag there
+#      (no need to tag first). This is the normal path.
+#   2. Push a tag yourself:  git tag 2026.09.1 && git push origin 2026.09.1
 #
+# Either way: signed, minified APK -> GitHub Release with BirdWatch-<tag>.apk, its SHA-256, the
+# R8 mapping file, and the signing certificate's SHA-1 in the notes.
 # versionName = the tag; versionCode = YYYYMM * 100 + N (see app/build.gradle.kts).
 on:
   push:
@@ -14,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing tag to build and release (YYYY.MM.N, e.g. 2026.09.1)"
+        description: "Version to release (YYYY.MM.N, e.g. 2026.09.1). The tag is created on this commit if it doesn't exist."
         required: true
         type: string
 
@@ -34,10 +37,9 @@ jobs:
             exit 1
           fi
 
+      # Tag push: checks out the tagged commit. Manual run: checks out the commit of the branch the
+      # workflow was launched from, which is where the release step will create the tag.
       - uses: actions/checkout@v4
-        with:
-          # For a manual run, build exactly the commit the tag points at.
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -103,6 +105,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          # Creates the tag at the built commit when it doesn't exist yet (manual runs).
+          target_commitish: ${{ github.sha }}
           name: ${{ env.RELEASE_TAG }}
           draft: false
           body_path: release-body.md

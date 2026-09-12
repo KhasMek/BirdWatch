@@ -273,8 +273,9 @@ installs over any release of that month and next month's release installs over d
 will not downgrade a non-debuggable install even with `adb install -d`; this avoids the
 uninstall.)
 
-**Release**: push a tag `YYYY.MM.N`; `.github/workflows/release.yml` validates the format, runs
-unit tests, builds a signed minified APK, and publishes a GitHub Release with
+**Release**: run `.github/workflows/release.yml` by hand from the Actions tab with the version
+as input (it creates the tag on the current commit), or push a tag `YYYY.MM.N`. Either way it
+validates the format, runs unit tests, builds a signed minified APK, and publishes a GitHub Release with
 `BirdWatch-<tag>.apk`, a sha256, and the R8 `mapping.txt`. It refuses to run without the
 `KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` secrets. CI
 (`ci.yml`) runs build + tests + lint on pushes to `main` and PRs. Release is minified with R8
