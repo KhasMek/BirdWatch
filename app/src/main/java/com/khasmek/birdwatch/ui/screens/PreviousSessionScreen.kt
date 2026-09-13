@@ -1,6 +1,8 @@
 package com.khasmek.birdwatch.ui.screens
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,18 +13,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,10 +53,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.data.ExportFormat
+import com.khasmek.birdwatch.data.SessionManager
 import com.khasmek.birdwatch.data.SessionSummary
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.ConfirmDeleteDialog
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
+import com.khasmek.birdwatch.ui.components.ImportFromEsp32Dialog
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
 import kotlinx.coroutines.launch
@@ -67,6 +76,47 @@ fun PreviousSessionScreen(
 
     var exportTarget by remember { mutableStateOf<SessionSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<SessionSummary?>(null) }
+    var showImport by remember { mutableStateOf(false) }
+
+    // Restore one of the app's own JSON/CSV exports. OpenDocument gives a persistable, read-only
+    // grant to exactly the file the user picked.
+    val pickExport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        viewModel.importFile(uri) { result ->
+            val msg = result.fold(
+                onSuccess = { "Imported ${it.devices.size} device${if (it.devices.size == 1) "" else "s"} from ${it.format.label}" },
+                onFailure = { e ->
+                    when (e) {
+                        is SessionManager.AlreadyImportedException -> "That session is already in the app"
+                        else -> "Import failed: ${e.message}"
+                    }
+                },
+            )
+            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    if (showImport) {
+        // Opening the dialog also nudges a connection so a freshly plugged-in board is usable.
+        LaunchedEffect(Unit) { viewModel.connectUsb() }
+        ImportFromEsp32Dialog(
+            connected = state.usb.isConnected,
+            onDismiss = { showImport = false },
+            onImport = { source ->
+                showImport = false
+                viewModel.importFromEsp32(source) { result ->
+                    val msg = result.fold(
+                        onSuccess = { r ->
+                            if (r.imported == 0) "ESP32 ${source.label} is empty; nothing to import"
+                            else "Imported ${r.imported} device${if (r.imported == 1) "" else "s"} from ESP32 ${source.label}"
+                        },
+                        onFailure = { "Import failed: ${it.message}" },
+                    )
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                }
+            },
+        )
+    }
 
     exportTarget?.let { target ->
         ExportFormatDialog(
@@ -89,7 +139,25 @@ fun PreviousSessionScreen(
         )
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Sessions") }) }) { innerPadding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Sessions") },
+                actions = {
+                    if (state.importing) {
+                        CircularProgressIndicator(modifier = Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
+                    } else {
+                        IconButton(onClick = { pickExport.launch(arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }) {
+                            Icon(Icons.Default.FileOpen, contentDescription = "Import exported session file")
+                        }
+                        IconButton(onClick = { showImport = true }) {
+                            Icon(Icons.Default.Usb, contentDescription = "Import from ESP32")
+                        }
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
         if (state.sessions.isEmpty()) {
             Column(
                 Modifier
@@ -102,7 +170,9 @@ fun PreviousSessionScreen(
                 Text("No sessions yet", style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Every scan you start from the Dashboard is saved here with its detections.",
+                    "Every scan you start from the Dashboard is saved here with its detections. " +
+                        "Use the icons above to restore a session from an exported JSON/CSV file, or to pull " +
+                        "in what the ESP32 recorded on its own.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -152,13 +222,17 @@ private fun SessionRow(
         Row(Modifier.padding(start = 14.dp, top = 10.dp, bottom = 10.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    text = TimeFormat.dateTime(s.startedAt) + if (isActive) "  ·  ACTIVE" else "",
+                    text = (s.label ?: TimeFormat.dateTime(s.startedAt)) + if (isActive) "  ·  ACTIVE" else "",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = "Duration ${TimeFormat.duration(s.durationMillis())}" +
-                        (if (isActive) " (running)" else ""),
+                    text = when {
+                        // ESP32 dumps carry no clock and no GPS; restored exports keep both.
+                        s.label?.startsWith("ESP32") == true -> "Imported ${TimeFormat.dateTime(s.startedAt)} · no GPS"
+                        s.isImported -> "${TimeFormat.dateTime(s.startedAt)} · ${TimeFormat.duration(s.durationMillis())}"
+                        else -> "Duration ${TimeFormat.duration(s.durationMillis())}" + (if (isActive) " (running)" else "")
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

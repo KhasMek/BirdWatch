@@ -160,9 +160,23 @@ The firmware emits one JSON object per line over USB CDC at 115200 baud:
 Rules: tier 3-4 -> `Confidence.HIGH`, tier 0-2 -> `Confidence.LOW`; `deviceType = FLOCK`;
 `source = ESP32_WIFI`. A higher tier for an already-seen MAC upgrades the stored method/tier;
 a lower tier never downgrades it. Other line types from the device (`{"event":"config",...}`,
-`session_begin` / `session_det` / `session_end` dump replies, free-form banners) must be parsed or
-ignored without crashing. The firmware also accepts commands as JSON lines (beep mask, dump_session);
-these are optional extras, not required for detection.
+free-form banners) are parsed or ignored without crashing.
+
+**Session import** (done): `UsbCompanion.dumpSession(LIVE|PREV)` sends
+`{"cmd":"dump_session","source":"live|prev"}` and collects `session_begin` / `session_det` /
+`session_end` (or `session_error`) with a 20 s timeout. `SessionManager.importFromEsp32` writes
+the records into a new, already-ended session with `label = "ESP32 import (memory|flash)"`
+(schema v3). Stored records use method names WITHOUT the `wifi_` prefix and the tier-1 label
+`oui_addr1_addr3`; `FirmwareLineParser.methodFromStoredName` normalises them. Records have only
+device-uptime timestamps and no GPS: `lastSeen` is anchored at import time, the first-to-last span
+is preserved, coordinates stay null. UI: USB icon on the Sessions tab. Beep-mask control over
+serial remains an optional extra.
+
+**Export restore** (done): `data/ExportReader.kt` (pure) parses the app's own JSON and CSV
+exports back into an `ImportedSession` (KML refused; foreign files rejected with a message);
+`SessionManager.importExported` keeps the original session id/timestamps/GPS, labels it
+"Imported (JSON|CSV)", and refuses an id that already exists. UI: file icon on the Sessions tab
+(`OpenDocument`). `ExportReaderTest` round-trips writer -> reader.
 
 ### B. Phone BLE (secondary, done) — all 5 methods from the BLE-era firmware
 

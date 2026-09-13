@@ -22,15 +22,20 @@ import com.khasmek.birdwatch.usb.FirmwareLineParser.toDetectedDevice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.io.IOException
 
 enum class UsbStatus(val label: String) {
@@ -185,6 +190,57 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
 
     fun clear() = table.clear()
 
+    /** Which of the ESP32's two detection tables to pull. */
+    enum class DumpSource(val wire: String, val label: String) {
+        /** Table accumulated since the device booted (RAM). */
+        LIVE("live", "memory"),
+        /** The run before the last power cycle, promoted to flash at boot. */
+        PREV("prev", "flash"),
+    }
+
+    class DumpFailedException(message: String) : Exception(message)
+
+    data class SessionDump(val source: DumpSource, val records: List<FirmwareMessage.SessionRecord>, val announcedCount: Int)
+
+    /**
+     * Ask the firmware for its stored detection table (`{"cmd":"dump_session","source":...}`) and
+     * collect the reply: `session_begin`, N x `session_det`, `session_end`. Subscribes to
+     * [messages] before sending so nothing is missed. Throws [DumpFailedException] on a
+     * `session_error` reply or if the device stops talking.
+     */
+    suspend fun dumpSession(source: DumpSource): SessionDump {
+        if (port == null) throw DumpFailedException("ESP32 is not connected")
+        val records = mutableListOf<FirmwareMessage.SessionRecord>()
+        var announced = -1
+        try {
+            withTimeout(DUMP_TIMEOUT_MS) {
+                messages
+                    .onSubscription {
+                        if (!send("""{"cmd":"dump_session","source":"${source.wire}"}""")) {
+                            throw DumpFailedException("Could not write to the ESP32")
+                        }
+                    }
+                    .transformWhile { msg ->
+                        when (msg) {
+                            is FirmwareMessage.SessionBegin -> { announced = msg.count; true }
+                            is FirmwareMessage.SessionRecord -> { records += msg; true }
+                            is FirmwareMessage.SessionEnd -> { emit(Unit); false }
+                            is FirmwareMessage.SessionError -> throw DumpFailedException(msg.error)
+                            else -> true // live detections and banners keep flowing during a dump
+                        }
+                    }
+                    .first()
+            }
+        } catch (e: TimeoutCancellationException) {
+            throw DumpFailedException(
+                if (announced < 0) "ESP32 did not answer (is it running the flock-you firmware?)"
+                else "Dump cut off after ${records.size} of $announced records"
+            )
+        }
+        Log.i(TAG, "Dumped ${records.size} records from ${source.label} (device announced $announced)")
+        return SessionDump(source, records, announced)
+    }
+
     // ------------------------------------------------------------------
 
     private fun findDriver(): UsbSerialDriver? =
@@ -310,6 +366,8 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
         private const val WRITE_TIMEOUT_MS = 500
         private const val READ_BUFFER_BYTES = 4096
         private const val MAX_LINE_CHARS = 16_384
+        /** 200 records at 115200 baud is well under a second; the margin covers flash reads. */
+        private const val DUMP_TIMEOUT_MS = 20_000L
 
         const val ESPRESSIF_VID = 0x303A
         /** 0x1001 = ESP32-S3 USB JTAG/serial (Arduino default), 0x0002 = TinyUSB CDC. */

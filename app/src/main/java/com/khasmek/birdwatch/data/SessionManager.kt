@@ -9,6 +9,7 @@ import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DetectionTable
 import com.khasmek.birdwatch.detection.ScanForegroundService
 import com.khasmek.birdwatch.location.LocationProvider
+import com.khasmek.birdwatch.usb.FirmwareLineParser.toDetectedDevice
 import com.khasmek.birdwatch.usb.UsbCompanion
 import com.khasmek.birdwatch.wifi.WifiApScanner
 import kotlinx.coroutines.CoroutineScope
@@ -170,6 +171,51 @@ class SessionManager(
     val previousSession: Flow<SessionSummary?> get() = sessionDao.observePrevious()
 
     suspend fun getSessionDevices(sessionId: String): List<DetectedDevice> = detectionDao.getBySession(sessionId)
+
+    /** Outcome of pulling the ESP32's stored table into a new session. */
+    data class ImportResult(val session: ScanSession, val imported: Int, val announced: Int)
+
+    /**
+     * Pull the ESP32's on-device detection table (memory or flash) into a brand-new, already-ended
+     * session labelled as an import. Records carry no wall-clock time and no GPS (see
+     * `SessionRecord.toDetectedDevice`), so they never merge into a live session.
+     */
+    suspend fun importFromEsp32(source: UsbCompanion.DumpSource): ImportResult {
+        val dump = usbCompanion.dumpSession(source)
+        val now = System.currentTimeMillis()
+        val session = ScanSession(
+            id = UUID.randomUUID().toString(),
+            startedAt = now,
+            endedAt = now,
+            label = "ESP32 import (${source.label})",
+        )
+        val devices = dump.records.map { it.toDetectedDevice(session.id, now) }
+            .distinctBy { it.macAddress } // defensive: the firmware table is unique by MAC already
+        db.withTransaction {
+            sessionDao.insert(session)
+            if (devices.isNotEmpty()) detectionDao.upsertAll(devices)
+        }
+        Log.i(TAG, "Imported ${devices.size} devices from ESP32 ${source.label} into session ${session.id}")
+        return ImportResult(session, devices.size, dump.announcedCount)
+    }
+
+    class AlreadyImportedException(val sessionId: String) : Exception("This session is already in the app")
+
+    /**
+     * Restore a session from one of the app's own JSON/CSV exports (parsed by [ExportReader]).
+     * The original id, timestamps and GPS are kept; a session with the same id is refused so the
+     * same file cannot be imported twice.
+     */
+    suspend fun importExported(parsed: ImportedSession): ImportedSession {
+        if (sessionDao.getById(parsed.session.id) != null) throw AlreadyImportedException(parsed.session.id)
+        val session = parsed.session.copy(label = parsed.session.label ?: "Imported (${parsed.format.label})")
+        db.withTransaction {
+            sessionDao.insert(session)
+            if (parsed.devices.isNotEmpty()) detectionDao.upsertAll(parsed.devices)
+        }
+        Log.i(TAG, "Imported session ${session.id} (${parsed.devices.size} devices) from ${parsed.format.label}")
+        return parsed.copy(session = session)
+    }
 
     suspend fun deleteSession(sessionId: String) {
         if (_currentSession.value?.id == sessionId) stopSuspending()

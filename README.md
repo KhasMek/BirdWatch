@@ -166,6 +166,17 @@ the current session and all sessions with the chips above the map.
 one for its detections, share it as JSON, CSV or KML through the Android share sheet, or delete
 it. The export icon on the dashboard shares the session that's running right now.
 
+**Restoring an export.** The file icon on the Sessions tab imports a JSON or CSV file that
+BirdWatch exported earlier, on this phone or another one, as a session with its original
+timestamps and GPS. KML can't be imported (it only carries located devices). A session that's
+already present is refused, so the same file can't be imported twice.
+
+**Importing from the ESP32.** The board keeps its own detection table when it runs on its own
+(powered from a battery pack, say). Plug it in, open the Sessions tab and tap the download icon to
+pull either the current run (from memory) or the previous run (saved to flash at power-off) into a
+new session. Imported detections have no GPS and are timestamped at import time, because the
+board has no clock; their tier, channel, signal and sighting counts are preserved.
+
 **Audio.** A two-note chirp for a high-confidence detection, a single blip for a low-confidence
 one, mirroring the ESP32 firmware's buzzer. Mute from the dashboard or Settings.
 

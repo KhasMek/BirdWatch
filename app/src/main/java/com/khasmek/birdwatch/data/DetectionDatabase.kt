@@ -12,12 +12,13 @@ import com.khasmek.birdwatch.detection.DetectedDevice
  * Schema JSON is exported to `app/schemas/` and drives the auto-migrations.
  *
  * v1 -> v2: nullable Remote ID columns on `detected_devices` (uasId, operatorId, target*, operator*).
+ * v2 -> v3: nullable `label` on `scan_sessions` (ESP32 imports).
  */
 @Database(
     entities = [DetectedDevice::class, ScanSession::class],
-    version = 2,
+    version = 3,
     exportSchema = true,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class DetectionDatabase : RoomDatabase() {
 

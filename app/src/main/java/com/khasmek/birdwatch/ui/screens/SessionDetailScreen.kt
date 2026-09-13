@@ -86,10 +86,10 @@ fun SessionDetailScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text(if (state.isActive) "Current session" else "Session")
+                        Text(s?.label ?: if (state.isActive) "Current session" else "Session")
                         s?.let {
                             Text(
-                                TimeFormat.dateTime(it.startedAt),
+                                (if (it.isImported) "Imported " else "") + TimeFormat.dateTime(it.startedAt),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
