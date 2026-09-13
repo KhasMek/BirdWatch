@@ -36,7 +36,8 @@ object ExportReader {
 
     /** Sniff the content and dispatch. Throws [ImportFormatException] with a user-readable reason. */
     fun parse(text: String, fileName: String? = null): ImportedSession {
-        val trimmed = text.trimStart('﻿', ' ', '\n', '\r', '\t')
+        // Strip a leading UTF-8 BOM (some editors add one) and whitespace before sniffing.
+        val trimmed = text.trimStart('\uFEFF', ' ', '\n', '\r', '\t')
         return when {
             trimmed.startsWith("{") -> parseJson(trimmed)
             trimmed.startsWith("<") -> throw ImportFormatException("KML files can't be imported; use the JSON or CSV export of the same session")
