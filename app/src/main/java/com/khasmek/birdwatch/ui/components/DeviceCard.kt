@@ -56,8 +56,13 @@ import com.khasmek.birdwatch.util.TimeFormat
  * Tap to expand: GPS, first/last seen clock times, sightings, matched value, tier/channel/firmware.
  */
 @Composable
-fun DeviceCard(device: DetectedDevice, now: Long, modifier: Modifier = Modifier) {
-    var expanded by rememberSaveable(device.macAddress) { mutableStateOf(false) }
+fun DeviceCard(
+    device: DetectedDevice,
+    now: Long,
+    modifier: Modifier = Modifier,
+    initiallyExpanded: Boolean = false,
+) {
+    var expanded by rememberSaveable(device.macAddress) { mutableStateOf(initiallyExpanded) }
     val typeColor = DetectionColors.forType(device.deviceType)
 
     Card(
