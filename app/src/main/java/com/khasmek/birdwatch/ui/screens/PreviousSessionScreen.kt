@@ -63,6 +63,9 @@ import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
 import kotlinx.coroutines.launch
 
+/** MIME types offered to the document picker for BirdWatch export files. */
+private val IMPORT_MIME_TYPES = arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")
+
 /** List of every scan session, newest first. Tap for details; overflow menu for export / delete. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,11 +150,21 @@ fun PreviousSessionScreen(
                     if (state.importing) {
                         CircularProgressIndicator(modifier = Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                     } else {
-                        IconButton(onClick = { pickExport.launch(arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")) }) {
-                            Icon(Icons.Default.FileOpen, contentDescription = "Import exported session file")
+                        var menu by remember { mutableStateOf(false) }
+                        IconButton(onClick = { menu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
                         }
-                        IconButton(onClick = { showImport = true }) {
-                            Icon(Icons.Default.Usb, contentDescription = "Import from ESP32")
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Import from ESP32…") },
+                                leadingIcon = { Icon(Icons.Default.Usb, null) },
+                                onClick = { menu = false; showImport = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Import session…") },
+                                leadingIcon = { Icon(Icons.Default.FileOpen, null) },
+                                onClick = { menu = false; pickExport.launch(IMPORT_MIME_TYPES) },
+                            )
                         }
                     }
                 },
@@ -171,8 +184,8 @@ fun PreviousSessionScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Every scan you start from the Dashboard is saved here with its detections. " +
-                        "Use the icons above to restore a session from an exported JSON/CSV file, or to pull " +
-                        "in what the ESP32 recorded on its own.",
+                        "The menu above can import a session from an exported JSON/CSV file, or pull in what " +
+                        "the ESP32 recorded on its own.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
