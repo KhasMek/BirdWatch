@@ -33,6 +33,50 @@ issue.
 Everything the app matches, with confidence level, source, and the reasons some candidates were
 excluded, is in [`docs/SIGNATURES.md`](docs/SIGNATURES.md).
 
+### How the confidence rating works
+
+Every detection is marked **high** or **low** confidence. It answers one question: how sure are we
+that this radio identifier belongs to the kind of hardware we say it does. It is decided per
+detection method, not by signal strength or how often something was seen. The rules:
+
+**Flock cameras via the ESP32.** The firmware grades each hit with a tier from 0 to 4; tiers 3 and
+4 are high, 0 to 2 are low.
+
+| Tier | What was seen | Confidence |
+|---|---|---|
+| 4 | Probe request from a known Flock address, wildcard SSID, *and* the information-element fingerprint | High (confirmed camera) |
+| 3 | Same probe pattern, fingerprint not matched (unfingerprinted firmware, or an unrelated device sharing the address) | High |
+| 2 | A Flock address as the transmitter of any frame | Low |
+| 1 | A Flock address seen only as the receiver or BSSID, i.e. a nearby access point echoed it | Low (false-positive prone) |
+| 0 | SSID keyword match (off by default in the firmware) | Low |
+
+If the same camera is seen again at a higher tier the stored tier goes up; it never goes down.
+
+**Flock and Raven via the phone's Bluetooth.**
+- High: a Flock-registered address prefix, a device name such as `Penguin` or `FS Ext Battery`,
+  the XUNTONG manufacturer ID, or the SoundThinking address prefix.
+- Low: a *contract manufacturer* address prefix (Liteon, USI). They build Flock hardware but also
+  plenty of consumer gear, so the address alone is weak evidence.
+- Raven: high if any of Raven's custom services (GPS, power, network, upload, error) is
+  advertised; low if the only match is a standard Bluetooth service (Device Information, Health
+  Thermometer, Location and Navigation) that ordinary devices advertise too.
+
+**Optional packs.** Each signature carries its own rating in the registry. Everything shipped so
+far is high, because only identifiers registered to, or observed exclusively on, the named vendor
+were included: Axon's company ID, service UUID and address prefixes; Meta glasses only when the
+Luxottica company ID *and* the Meta service appear in the same advertisement (or the name
+matches); and the vendor address prefixes for the in-car video systems and drones. Candidates
+that would have rated low, such as generic Getac or Panasonic prefixes or a Meta company ID on
+its own, were left out rather than shipped as low.
+
+**Remote ID.** Always high: the decoded broadcast is the evidence itself, not an inference from an
+address.
+
+Confidence says nothing about whether the device is active right now or how close it is; signal
+strength and the sighting count carry that. It is also separate from the **beta** tag on packs,
+which is about whether anyone has confirmed on real hardware how often the device broadcasts,
+not about attribution.
+
 ## What you need
 
 - **An Android phone**, Android 8.0 or newer, with Bluetooth LE. WiFi-beacon Remote ID needs
