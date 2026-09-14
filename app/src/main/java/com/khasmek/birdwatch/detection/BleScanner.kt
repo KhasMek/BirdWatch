@@ -13,6 +13,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.location.LocationManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
@@ -83,11 +85,34 @@ class BleScanner(context: Context) {
     private val rawLock = Any()
     private var rawCount = 0L
     private var lastRawPublish = 0L
+
+    /**
+     * Guards every start/stop transition. Callers arrive on the main thread (lifecycle observer,
+     * broadcast receiver), a Default dispatcher (session stop) and the binder thread
+     * ([ScanCallback.onScanFailed]); without this, a stop racing a mode switch could register a
+     * fresh callback after the old one was cleared and leave the radio scanning with no session.
+     */
+    private val lock = Any()
     private var activeCallback: ScanCallback? = null
 
     /** True between start() and stop(): the session wants scanning even if the radio is currently off. */
     @Volatile
     private var wantScanning = false
+
+    /**
+     * Restart budget. The Bluetooth stack refuses `startScan` once an app has stopped five scans
+     * inside 30 s ("scanning too frequently"), and a refused start is reported only through
+     * [ScanCallback.onScanFailed]. Every mode switch is a stop + start, so a few quick
+     * foreground/background transitions would otherwise silence the radio for the rest of the
+     * session. [ScanRestartBudget] tracks our own stops so a restart is deferred until it is safe.
+     */
+    private val restartBudget = ScanRestartBudget()
+    private val handler = Handler(Looper.getMainLooper())
+    private val retryRunnable = Runnable { retryStart() }
+    /** Mode the caller asked for while a restart was deferred; applied by [retryStart]. */
+    private var pendingMode: Int? = null
+    @Volatile
+    private var retryAttempt = 0
 
     val isScanning: Boolean get() = _status.value.isScanning
 
@@ -96,12 +121,14 @@ class BleScanner(context: Context) {
             when (intent.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
-                    if (state == BluetoothAdapter.STATE_ON && wantScanning && activeCallback == null) {
-                        Log.i(TAG, "Bluetooth came on; resuming scan")
-                        start(_status.value.scanMode)
-                    } else if (state == BluetoothAdapter.STATE_OFF && activeCallback != null) {
-                        activeCallback = null // the stack already tore the scan down
-                        _status.update { it.copy(isScanning = false, error = "Bluetooth is turned off", errorIssue = ScanIssue.BLUETOOTH_OFF) }
+                    synchronized(lock) {
+                        if (state == BluetoothAdapter.STATE_ON && wantScanning && activeCallback == null) {
+                            Log.i(TAG, "Bluetooth came on; resuming scan")
+                            start(pendingMode ?: _status.value.scanMode)
+                        } else if (state == BluetoothAdapter.STATE_OFF && activeCallback != null) {
+                            activeCallback = null // the stack already tore the scan down; it does not count as our stop
+                            _status.update { it.copy(isScanning = false, error = "Bluetooth is turned off", errorIssue = ScanIssue.BLUETOOTH_OFF) }
+                        }
                     }
                 }
                 LocationManager.MODE_CHANGED_ACTION -> if (activeCallback != null) {
@@ -123,14 +150,59 @@ class BleScanner(context: Context) {
         )
     }
 
-    /** Start (or restart with a new mode) a continuous scan. Safe to call repeatedly. */
-    fun start(scanMode: Int = _status.value.scanMode) {
+    /**
+     * Start (or restart with a new mode) a continuous scan. Safe to call repeatedly. A mode change
+     * that would exceed the restart budget is applied later, automatically.
+     */
+    fun start(scanMode: Int = _status.value.scanMode): Unit = synchronized(lock) {
         wantScanning = true
         if (activeCallback != null) {
-            if (scanMode == _status.value.scanMode) return
+            if (scanMode == _status.value.scanMode) {
+                pendingMode = null
+                return
+            }
+            val wait = restartBudget.msUntilRestartAllowed(System.currentTimeMillis())
+            if (wait > 0) {
+                pendingMode = scanMode
+                Log.i(TAG, "Deferring switch to ${modeName(scanMode)} by ${wait} ms (restart budget)")
+                schedule(wait)
+                return
+            }
             stopInternal()
         }
+        pendingMode = null
+        startInternal(scanMode)
+    }
 
+    fun stop(): Unit = synchronized(lock) {
+        wantScanning = false
+        pendingMode = null
+        retryAttempt = 0
+        handler.removeCallbacks(retryRunnable)
+        stopInternal()
+        _status.update { it.copy(isScanning = false, error = null, errorIssue = null) }
+        Log.i(TAG, "Scan stopped")
+    }
+
+    /** Change scan mode; restarts the scan if one is running (subject to the restart budget). */
+    fun setScanMode(scanMode: Int): Unit = synchronized(lock) {
+        if (activeCallback != null || (wantScanning && pendingMode != null)) start(scanMode)
+        else _status.update { it.copy(scanMode = scanMode) }
+    }
+
+    /** Drop every detection and reset counters. Does not affect scanning state. */
+    fun clear() {
+        table.clear()
+        synchronized(rawLock) { rawCount = 0 }
+        _status.update { it.copy(rawAdvertisements = 0) }
+    }
+
+    // ------------------------------------------------------------------
+    // Internals
+    // ------------------------------------------------------------------
+
+    /** Must hold [lock]. Runs preflight, registers a fresh callback, publishes status. */
+    private fun startInternal(scanMode: Int) {
         preflight()?.let { (issue, message) ->
             Log.w(TAG, "Cannot start scan: $message")
             _status.update { it.copy(isScanning = false, scanMode = scanMode, error = message, errorIssue = issue) }
@@ -157,6 +229,7 @@ class BleScanner(context: Context) {
         }
 
         activeCallback = callback
+        handler.removeCallbacks(retryRunnable)
         val (warning, warningIssue) = locationWarning()
         _status.update {
             it.copy(isScanning = true, scanMode = scanMode, error = null, errorIssue = null, warning = warning, warningIssue = warningIssue)
@@ -164,39 +237,18 @@ class BleScanner(context: Context) {
         Log.i(TAG, "Scan started (mode=${modeName(scanMode)})")
     }
 
-    fun stop() {
-        wantScanning = false
-        stopInternal()
-        _status.update { it.copy(isScanning = false, error = null, errorIssue = null) }
-        Log.i(TAG, "Scan stopped")
-    }
-
-    /** Change scan mode; restarts the scan if one is running. */
-    fun setScanMode(scanMode: Int) {
-        if (isScanning) start(scanMode) else _status.update { it.copy(scanMode = scanMode) }
-    }
-
-    /** Drop every detection and reset counters. Does not affect scanning state. */
-    fun clear() {
-        table.clear()
-        synchronized(rawLock) { rawCount = 0 }
-        _status.update { it.copy(rawAdvertisements = 0) }
-    }
-
-    // ------------------------------------------------------------------
-    // Internals
-    // ------------------------------------------------------------------
-
     @SuppressLint("MissingPermission") // caller-side permission check done in preflight()
     private fun startScanChecked(scanner: BluetoothLeScanner, settings: ScanSettings, cb: ScanCallback) {
         // Unfiltered scan on purpose: OUI + name matching cannot be expressed as hardware filters.
         scanner.startScan(null, settings, cb)
     }
 
+    /** Must hold [lock]. Unregisters the callback and records the stop against the restart budget. */
     @SuppressLint("MissingPermission")
     private fun stopInternal() {
         val cb = activeCallback ?: return
         activeCallback = null
+        restartBudget.recordStop(System.currentTimeMillis())
         try {
             adapter?.bluetoothLeScanner?.stopScan(cb)
         } catch (e: SecurityException) {
@@ -204,6 +256,31 @@ class BleScanner(context: Context) {
         } catch (e: IllegalStateException) {
             // Adapter already off; nothing to stop.
         }
+    }
+
+    // ---- deferred restarts -----------------------------------------------------------------
+
+    private fun schedule(delayMs: Long) {
+        handler.removeCallbacks(retryRunnable)
+        handler.postDelayed(retryRunnable, delayMs)
+    }
+
+    /** Runs on the main thread: apply a deferred mode switch or retry after a failed start. */
+    private fun retryStart(): Unit = synchronized(lock) {
+        if (!wantScanning) return
+        val mode = pendingMode ?: _status.value.scanMode
+        if (activeCallback != null && pendingMode == null) return // nothing to do; a start succeeded meanwhile
+        Log.i(TAG, "Retrying scan start (mode=${modeName(mode)}, attempt=$retryAttempt)")
+        start(mode)
+    }
+
+    /** Must hold [lock]. Called when a start failed asynchronously and the session still wants to scan. */
+    private fun scheduleRetryAfterFailure() {
+        retryAttempt++
+        val backoff = (RETRY_BASE_MS shl (retryAttempt - 1).coerceAtMost(4)).coerceAtMost(RETRY_MAX_MS)
+        val delay = maxOf(backoff, restartBudget.msUntilRestartAllowed(System.currentTimeMillis()))
+        Log.i(TAG, "Scan start will be retried in $delay ms")
+        schedule(delay)
     }
 
     private fun preflight(): Pair<ScanIssue, String>? {
@@ -249,13 +326,20 @@ class BleScanner(context: Context) {
                 else -> "error code $errorCode"
             }
             Log.e(TAG, "Scan failed: $reason")
-            activeCallback = null
-            _status.update { it.copy(isScanning = false, error = "Scan failed: $reason", errorIssue = ScanIssue.SCAN_FAILED) }
+            synchronized(lock) {
+                // Only the callback that failed may tear the state down; a stale one must not
+                // clobber a scan that was restarted since.
+                if (activeCallback !== this) return
+                activeCallback = null
+                _status.update { it.copy(isScanning = false, error = "Scan failed: $reason", errorIssue = ScanIssue.SCAN_FAILED) }
+                if (wantScanning) scheduleRetryAfterFailure()
+            }
         }
     }
 
     private fun handle(result: ScanResult) {
         publishRawCount()
+        if (retryAttempt != 0) retryAttempt = 0 // results are flowing again
 
         val adv = result.toAdvertisement() ?: return
         val classification = DeviceClassifier.classify(adv, enabledPacks) ?: return
@@ -351,5 +435,7 @@ class BleScanner(context: Context) {
     companion object {
         private const val TAG = "BirdWatch/BleScanner"
         private const val RAW_PUBLISH_INTERVAL_MS = 500L
+        private const val RETRY_BASE_MS = 2_000L
+        private const val RETRY_MAX_MS = 60_000L
     }
 }

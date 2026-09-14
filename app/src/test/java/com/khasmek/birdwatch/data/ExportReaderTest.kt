@@ -66,6 +66,27 @@ class ExportReaderTest {
     }
 
     @Test
+    fun `csv cells with line breaks, commas and quotes survive the round trip`() {
+        val nasty = raven.copy(deviceName = "Line one\nline \"two\", still\r\nthree", matchedOn = "a,b")
+        val back = ExportReader.parse(ExportWriter.csv(listOf(flock, nasty)), "x.csv")
+        assertEquals(2, back.devices.size)
+        assertEquals(nasty, back.devices.first { it.macAddress == nasty.macAddress })
+    }
+
+    @Test
+    fun `csv records tokenizer handles CRLF, blank lines and a missing trailing newline`() {
+        val records = ExportReader.parseCsvRecords("a,b\r\n\r\n\"x\r\ny\",\"q\"\"q\"\n\nlast,row")
+        assertEquals(listOf(listOf("a", "b"), listOf("x\r\ny", "q\"q"), listOf("last", "row")), records)
+    }
+
+    @Test
+    fun `session label survives a json round trip`() {
+        val labelled = session.copy(label = "ESP32 import (flash)")
+        val back = ExportReader.parse(ExportWriter.json(labelled, listOf(flock), 0L))
+        assertEquals("ESP32 import (flash)", back.session.label)
+    }
+
+    @Test
     fun `unknown enum spellings fall back instead of failing`() {
         val text = ExportWriter.json(session, listOf(flock), 0L)
             .replace("\"WIFI_WILDCARD_PROBE_IE_SIG\"", "\"wifi_wildcard_probe_ie_sig\"") // wire name spelling

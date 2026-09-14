@@ -118,31 +118,53 @@ object BackupReader {
         val entries = root["sessions"] as? JsonArray ?: throw ImportFormatException("Backup has no \"sessions\" array")
         val bundles = entries.mapIndexed { i, el ->
             val obj = el as? JsonObject ?: throw ImportFormatException("Backup session #${i + 1} is malformed")
+            if (obj["session"] !is JsonObject) throw ImportFormatException("Backup session #${i + 1} has no session object")
             // Each entry is exactly an export document minus the outer header, so reuse that parser.
-            val asExport = buildJsonObject {
-                put("session", obj["session"] ?: throw ImportFormatException("Backup session #${i + 1} has no session object"))
-                put("devices", obj["devices"] ?: JsonArray(emptyList()))
-            }
-            val parsed = ExportReader.parseJson(ExportWriter.json.encodeToString(JsonObject.serializer(), asExport))
-            val label = ((obj["session"] as? JsonObject)?.get("label") as? JsonPrimitive)?.contentOrNull
-            SessionBundle(parsed.session.copy(label = label), parsed.devices)
+            val parsed = ExportReader.parseJson(obj)
+            SessionBundle(parsed.session, parsed.devices)
         }
         return ParsedBackup(bundles, ExportFormat.JSON)
     }
 
     /** CSV rows may span several sessions; each session is reconstructed from its rows. */
     fun parseCsv(text: String): ParsedBackup {
-        val lines = text.lines().filter { it.isNotBlank() }
-        if (lines.size < 2) throw ImportFormatException("CSV has no rows")
-        val header = lines.first()
-        val col = ExportReader.splitCsvLine(header).withIndex().associate { (i, n) -> n to i }
-        val sid = col["session_id"] ?: throw ImportFormatException("CSV is missing the \"session_id\" column; not a BirdWatch export")
-        val bySession = lines.drop(1).groupBy { ExportReader.splitCsvLine(it).getOrNull(sid).orEmpty() }
+        val records = ExportReader.parseCsvRecords(text)
+        if (records.size < 2) throw ImportFormatException("CSV has no rows")
+        val header = records.first()
+        val sid = header.indexOf("session_id")
+        if (sid < 0) throw ImportFormatException("CSV is missing the \"session_id\" column; not a BirdWatch export")
+        val bySession = records.drop(1).groupBy { it.getOrNull(sid).orEmpty() }
         if (bySession.keys.any { it.isEmpty() }) throw ImportFormatException("A CSV row has no session_id")
         val bundles = bySession.map { (_, rows) ->
-            val single = ExportReader.parseCsv((listOf(header) + rows).joinToString("\n"))
+            val single = ExportReader.parseCsvRows(header, rows)
             SessionBundle(single.session, single.devices)
         }
         return ParsedBackup(bundles, ExportFormat.CSV)
     }
+}
+
+/**
+ * Combine a detection already on the phone with the same (session, MAC) from a backup. The more
+ * recently seen record wins the per-sighting fields (RSSI, GPS, Remote ID position); the span,
+ * sighting count, tier and a learned name are taken from whichever record has the most.
+ * Restoring an old backup therefore never regresses a row that kept scanning after the backup.
+ */
+fun mergeDetection(local: DetectedDevice, incoming: DetectedDevice): DetectedDevice {
+    val newer = if (incoming.lastSeen > local.lastSeen) incoming else local
+    val older = if (newer === incoming) local else incoming
+    val best = if ((incoming.tier ?: -1) > (local.tier ?: -1)) incoming else local
+    return newer.copy(
+        sessionId = local.sessionId,
+        deviceName = newer.deviceName ?: older.deviceName,
+        detectionMethod = best.detectionMethod,
+        confidence = best.confidence,
+        matchedOn = best.matchedOn,
+        tier = best.tier,
+        ravenFirmware = newer.ravenFirmware ?: older.ravenFirmware,
+        firstSeen = minOf(local.firstSeen, incoming.firstSeen),
+        lastSeen = maxOf(local.lastSeen, incoming.lastSeen),
+        sightings = maxOf(local.sightings, incoming.sightings),
+        uasId = newer.uasId ?: older.uasId,
+        operatorId = newer.operatorId ?: older.operatorId,
+    )
 }

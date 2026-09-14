@@ -21,10 +21,13 @@ import androidx.lifecycle.lifecycleScope
 import com.khasmek.birdwatch.BirdWatchApp
 import com.khasmek.birdwatch.MainActivity
 import com.khasmek.birdwatch.R
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -46,15 +49,26 @@ class ScanForegroundService : LifecycleService() {
 
     private var appInForeground = true
 
+    /** Pending switch to LOW_POWER; cancelled if the app comes back before it fires. */
+    private var backgroundSwitch: Job? = null
+
     private val processObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
             appInForeground = true
+            backgroundSwitch?.cancel()
             applyScanMode()
         }
 
         override fun onStop(owner: LifecycleOwner) {
             appInForeground = false
-            applyScanMode()
+            // Every mode switch restarts the scan, and the Bluetooth stack rations restarts. Wait a
+            // moment before dropping to LOW_POWER so a screen that flicks off and on again costs
+            // nothing; BleScanner defers anything that would still exceed the budget.
+            backgroundSwitch?.cancel()
+            backgroundSwitch = lifecycleScope.launch {
+                delay(BACKGROUND_MODE_DELAY_MS)
+                applyScanMode()
+            }
         }
     }
 
@@ -75,7 +89,7 @@ class ScanForegroundService : LifecycleService() {
             }
             else -> {
                 // Must be called promptly after startForegroundService(); do it before any real work.
-                goForeground(buildNotification(0, 0, 0))
+                goForeground(buildNotification(DeviceCounts()))
                 val mode = intent?.getIntExtra(EXTRA_SCAN_MODE, settings.scanMode) ?: settings.scanMode
                 lifecycleScope.launch {
                     sessionManager.startSuspending(mode)
@@ -88,6 +102,7 @@ class ScanForegroundService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        backgroundSwitch?.cancel()
         ProcessLifecycleOwner.get().lifecycle.removeObserver(processObserver)
         super.onDestroy()
         Log.i(TAG, "Service destroyed")
@@ -101,17 +116,15 @@ class ScanForegroundService : LifecycleService() {
         if (observing) return
         observing = true
 
-        // Live notification: "Scanning… N devices found" with Flock / Raven breakdown.
+        // Live notification: "Scanning… N devices found" with a per-category breakdown. Counts
+        // are reduced before distinctUntilChanged so the 2 s re-sighting flush does not re-post.
         lifecycleScope.launch {
             sessionManager.observeCurrentDevices()
                 .combine(sessionManager.currentSession) { devices, session -> devices to session }
                 .filter { (_, session) -> session != null }
+                .map { (devices, _) -> DeviceCounts.of(devices) }
                 .distinctUntilChanged()
-                .collect { (devices, _) ->
-                    val flock = devices.count { it.deviceType == DeviceType.FLOCK }
-                    val raven = devices.size - flock
-                    notificationManager.notify(NOTIFICATION_ID, buildNotification(devices.size, flock, raven))
-                }
+                .collect { counts -> notificationManager.notify(NOTIFICATION_ID, buildNotification(counts)) }
         }
 
         // Session ended (by any path) -> leave foreground and stop.
@@ -161,7 +174,27 @@ class ScanForegroundService : LifecycleService() {
         notificationManager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(total: Int, flock: Int, raven: Int): Notification {
+    /** What the notification shows: total plus the two core categories; everything else is "other". */
+    private data class DeviceCounts(val total: Int = 0, val flock: Int = 0, val raven: Int = 0) {
+        val other: Int get() = total - flock - raven
+
+        fun subText(): String? = if (total == 0) null else buildList {
+            if (flock > 0) add("$flock Flock")
+            if (raven > 0) add("$raven Raven")
+            if (other > 0) add("$other other")
+        }.joinToString(" · ")
+
+        companion object {
+            fun of(devices: List<DetectedDevice>) = DeviceCounts(
+                total = devices.size,
+                flock = devices.count { it.deviceType.category == DeviceCategory.FLOCK_ALPR },
+                raven = devices.count { it.deviceType.category == DeviceCategory.GUNSHOT_DETECTOR },
+            )
+        }
+    }
+
+    private fun buildNotification(counts: DeviceCounts): Notification {
+        val total = counts.total
         val openApp = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
@@ -181,7 +214,7 @@ class ScanForegroundService : LifecycleService() {
             .setSmallIcon(R.drawable.ic_stat_scan)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(text)
-            .setSubText(if (total > 0) "$flock Flock · $raven Raven" else null)
+            .setSubText(counts.subText())
             .setContentIntent(openApp)
             .addAction(0, "Stop", stop)
             .setOngoing(true)
@@ -200,6 +233,7 @@ class ScanForegroundService : LifecycleService() {
         const val ACTION_START = "com.khasmek.birdwatch.action.START_SCAN"
         const val ACTION_STOP = "com.khasmek.birdwatch.action.STOP_SCAN"
         const val EXTRA_SCAN_MODE = "scan_mode"
+        private const val BACKGROUND_MODE_DELAY_MS = 10_000L
 
         /** Start (or re-deliver start to) the service. Must be called while the app is visible. */
         fun start(context: Context, scanMode: Int) {

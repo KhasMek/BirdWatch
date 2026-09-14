@@ -30,17 +30,33 @@ class SecureSettings(context: Context, scope: CoroutineScope) {
 
     private val appContext = context.applicationContext
 
-    private val prefs: SharedPreferences by lazy {
+    private val prefs: SharedPreferences by lazy { openPrefs() }
+
+    private fun createPrefs(): SharedPreferences {
         val masterKey = MasterKey.Builder(appContext)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
-        EncryptedSharedPreferences.create(
+        return EncryptedSharedPreferences.create(
             appContext,
             FILE,
             masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
+    }
+
+    /**
+     * The key set inside the prefs file is wrapped by a Keystore key that never leaves the device
+     * it was made on. If the file cannot be opened (app data copied from another phone, a wiped
+     * Keystore), it is useless: throw it away and start with an empty store rather than failing
+     * every later write. The user just re-enters the Maps key.
+     */
+    private fun openPrefs(): SharedPreferences = try {
+        createPrefs()
+    } catch (e: Exception) {
+        Log.w(TAG, "Encrypted settings could not be opened; resetting them", e)
+        appContext.deleteSharedPreferences(FILE)
+        createPrefs()
     }
 
     private val _mapsApiKey = MutableStateFlow<String?>(null)
@@ -61,6 +77,7 @@ class SecureSettings(context: Context, scope: CoroutineScope) {
         }
     }
 
+    /** Persist (or clear, when null/blank). Throws if the encrypted store is unusable even after a reset. */
     suspend fun setMapsApiKey(key: String?) = withContext(Dispatchers.IO) {
         val clean = key?.trim()?.takeIf { it.isNotEmpty() }
         prefs.edit { if (clean == null) remove(KEY_MAPS) else putString(KEY_MAPS, clean) }

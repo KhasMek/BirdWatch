@@ -80,6 +80,38 @@ class BackupTest {
     }
 
     @Test
+    fun `csv backup keeps multi-line names in the right session`() {
+        val nasty = flock1.copy(deviceName = "cam\n\"two\"")
+        val back = BackupReader.parse(BackupWriter.csv(listOf(SessionBundle(s1, listOf(nasty, raven1)), SessionBundle(s2, listOf(axon2)))))
+        assertEquals(2, back.sessions.size)
+        assertEquals(nasty, back.sessions.first { it.session.id == "s1" }.devices.first { it.macAddress == nasty.macAddress })
+    }
+
+    @Test
+    fun `merge never regresses a row that kept scanning after the backup`() {
+        val backedUp = flock1.copy(sightings = 5, lastSeen = 1_100_000L, rssi = -80, latitude = 1.0, longitude = 1.0, tier = 2)
+        val local = flock1.copy(sightings = 500, lastSeen = 1_900_000L, rssi = -40, latitude = 2.0, longitude = 2.0, tier = 4, deviceName = "learned")
+        val merged = mergeDetection(local, backedUp)
+        assertEquals(local, merged) // newer, more sightings, higher tier, has a name: nothing to take
+        // Symmetric: restoring a newer record onto an older local row takes the newer fields.
+        val fromNewerBackup = mergeDetection(backedUp, local)
+        assertEquals(local.copy(firstSeen = minOf(local.firstSeen, backedUp.firstSeen)), fromNewerBackup)
+    }
+
+    @Test
+    fun `merge combines span, name and tier from both sides`() {
+        val local = flock1.copy(firstSeen = 1_000L, lastSeen = 5_000L, sightings = 3, deviceName = null, tier = 4)
+        val incoming = flock1.copy(firstSeen = 500L, lastSeen = 4_000L, sightings = 9, deviceName = "old name", tier = 2, rssi = -99)
+        val merged = mergeDetection(local, incoming)
+        assertEquals(500L, merged.firstSeen)
+        assertEquals(5_000L, merged.lastSeen)
+        assertEquals(9, merged.sightings)
+        assertEquals("old name", merged.deviceName)
+        assertEquals(4, merged.tier)
+        assertEquals(local.rssi, merged.rssi) // local is the more recent sighting
+    }
+
+    @Test
     fun `file name is timestamped`() {
         assertEquals("birdwatch_backup_19700101T000000Z.json", BackupWriter.fileName(ExportFormat.JSON, 0L))
     }

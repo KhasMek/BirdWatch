@@ -48,6 +48,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,8 +58,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.data.ExportFormat
-import com.khasmek.birdwatch.data.ParsedBackup
-import com.khasmek.birdwatch.data.SessionManager
 import com.khasmek.birdwatch.data.SessionSummary
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.BackupDialog
@@ -82,50 +81,47 @@ private val IMPORT_MIME_TYPES = arrayOf("application/json", "text/csv", "text/co
 @Composable
 fun PreviousSessionScreen(
     onOpenSession: (String) -> Unit,
-    viewModel: SessionsViewModel = appViewModel { SessionsViewModel(it) },
+    viewModel: SessionsViewModel = appViewModel { container, saved -> SessionsViewModel(container, saved) },
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-    fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
 
     var exportTarget by remember { mutableStateOf<SessionSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<SessionSummary?>(null) }
-    var showImport by remember { mutableStateOf(false) }
-    var showBackup by remember { mutableStateOf(false) }
-    var restoreParsed by remember { mutableStateOf<ParsedBackup?>(null) }
-    var showDeleteAll by remember { mutableStateOf(false) }
+    var showImport by rememberSaveable { mutableStateOf(false) }
+    var showBackup by rememberSaveable { mutableStateOf(false) }
+    var showDeleteAll by rememberSaveable { mutableStateOf(false) }
+
+    // Outcomes of the long-running operations arrive here, whenever they finish.
+    LaunchedEffect(Unit) { viewModel.messages.collect { toast(it) } }
 
     // ---- launchers -------------------------------------------------------------------------
 
     val pickExport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        viewModel.importFile(uri) { result ->
-            toast(result.fold(
-                onSuccess = { "Imported ${plural(it.devices.size, "device")} from ${it.format.label}" },
-                onFailure = { e -> if (e is SessionManager.AlreadyImportedException) "That session is already in the app" else "Import failed: ${e.message}" },
-            ))
-        }
+        if (uri != null) viewModel.importFile(uri)
     }
-
     val pickBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        viewModel.parseBackup(uri) { result ->
-            result.fold(onSuccess = { restoreParsed = it }, onFailure = { toast("Can't restore: ${it.message}") })
+        if (uri != null) viewModel.parseBackup(uri)
+    }
+    // "Save as": one launcher per format because CreateDocument fixes the MIME type up front.
+    val saveJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.JSON.mimeType)) { viewModel.writeBackup(it) }
+    val saveCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.CSV.mimeType)) { viewModel.writeBackup(it) }
+    val saveKml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.KML.mimeType)) { viewModel.writeBackup(it) }
+
+    // The backup is built asynchronously; open the picker only while this screen is composed
+    // (the launchers above are unregistered as soon as it isn't).
+    val saveRequest = state.saveRequest
+    LaunchedEffect(saveRequest) {
+        if (saveRequest == null) return@LaunchedEffect
+        viewModel.saveRequestHandled()
+        when (saveRequest.format) {
+            ExportFormat.JSON -> saveJson.launch(saveRequest.fileName)
+            ExportFormat.CSV -> saveCsv.launch(saveRequest.fileName)
+            ExportFormat.KML -> saveKml.launch(saveRequest.fileName)
         }
     }
-
-    // "Save as": one launcher per format because CreateDocument fixes the MIME type up front.
-    val onBackupWritten: (Result<com.khasmek.birdwatch.data.BackupPayload>) -> Unit = { result ->
-        toast(result.fold(
-            onSuccess = { "Backed up ${plural(it.sessionCount, "session")}, ${plural(it.deviceCount, "device")} to ${it.fileName}" },
-            onFailure = { "Backup failed: ${it.message}" },
-        ))
-    }
-    val saveJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.JSON.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
-    val saveCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.CSV.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
-    val saveKml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.KML.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
 
     // ---- dialogs ---------------------------------------------------------------------------
 
@@ -156,12 +152,7 @@ fun PreviousSessionScreen(
             onDismiss = { showImport = false },
             onImport = { source ->
                 showImport = false
-                viewModel.importFromEsp32(source) { result ->
-                    toast(result.fold(
-                        onSuccess = { r -> if (r.imported == 0) "ESP32 ${source.label} is empty; nothing to import" else "Imported ${plural(r.imported, "device")} from ESP32 ${source.label}" },
-                        onFailure = { "Import failed: ${it.message}" },
-                    ))
-                }
+                viewModel.importFromEsp32(source)
             },
         )
     }
@@ -171,37 +162,15 @@ fun PreviousSessionScreen(
             onDismiss = { showBackup = false },
             onBackup = { categories, format ->
                 showBackup = false
-                viewModel.prepareBackup(categories, format) { result ->
-                    result.fold(
-                        onSuccess = { payload ->
-                            when (format) {
-                                ExportFormat.JSON -> saveJson.launch(payload.fileName)
-                                ExportFormat.CSV -> saveCsv.launch(payload.fileName)
-                                ExportFormat.KML -> saveKml.launch(payload.fileName)
-                            }
-                        },
-                        onFailure = { toast("Backup failed: ${it.message}") },
-                    )
-                }
+                viewModel.prepareBackup(categories, format)
             },
         )
     }
-    restoreParsed?.let { parsed ->
+    state.parsedRestore?.let { parsed ->
         RestoreDialog(
             backup = parsed,
-            onDismiss = { restoreParsed = null },
-            onRestore = { categories ->
-                restoreParsed = null
-                viewModel.restore(parsed, categories) { result ->
-                    toast(result.fold(
-                        onSuccess = { r ->
-                            "Restored: ${plural(r.sessionsAdded, "new session")}, ${plural(r.sessionsMerged, "merged")}, " +
-                                "${plural(r.devicesAdded, "device")} added, ${r.devicesUpdated} updated"
-                        },
-                        onFailure = { "Restore failed: ${it.message}" },
-                    ))
-                }
-            },
+            onDismiss = { viewModel.dismissRestore() },
+            onRestore = { categories -> viewModel.restore(categories) },
         )
     }
     if (showDeleteAll) {
@@ -212,9 +181,7 @@ fun PreviousSessionScreen(
             onDismiss = { showDeleteAll = false },
             onConfirm = {
                 showDeleteAll = false
-                viewModel.deleteAll { result ->
-                    toast(result.fold(onSuccess = { "All sessions and detections deleted" }, onFailure = { "Delete failed: ${it.message}" }))
-                }
+                viewModel.deleteAll()
             },
         )
     }

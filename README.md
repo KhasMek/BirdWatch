@@ -236,8 +236,11 @@ one, mirroring the ESP32 firmware's buzzer. Mute from the dashboard or Settings.
 ## Privacy
 
 Everything stays on your phone. There is no account, no server, no analytics, and no network
-traffic apart from Google Maps tiles when you use the map with your own key. Exports contain
-GPS coordinates and timestamps; treat them accordingly before sharing.
+traffic apart from Google Maps tiles when you use the map with your own key. The app opts out
+of Android's cloud backup and device-to-device transfer, so the detection database and your
+Maps key are never copied off the phone by the system; use Sessions > Back up… when you want to
+move data yourself. Exports and backups contain GPS coordinates and timestamps; treat them
+accordingly before sharing.
 
 ## Relationship to flock-you
 

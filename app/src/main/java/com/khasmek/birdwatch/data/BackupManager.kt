@@ -30,13 +30,20 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
 
     suspend fun totals(): Pair<Int, Int> = db.sessionDao().count() to db.detectionDao().count()
 
-    suspend fun createBackup(categories: Set<DeviceCategory>, format: ExportFormat, now: Long = System.currentTimeMillis()): BackupPayload {
+    /** Query and serialise on a background dispatcher; the text can be large. */
+    suspend fun createBackup(
+        categories: Set<DeviceCategory>,
+        format: ExportFormat,
+        now: Long = System.currentTimeMillis(),
+        fileName: String = BackupWriter.fileName(format, now),
+    ): BackupPayload = withContext(Dispatchers.Default) {
         val sessions = db.sessionDao().getAll()
+        val bySession = db.detectionDao().getAll().groupBy { it.sessionId }
         val bundles = sessions.map { s ->
-            SessionBundle(s, db.detectionDao().getBySession(s.id).filter { it.deviceType.category in categories })
+            SessionBundle(s, bySession[s.id].orEmpty().filter { it.deviceType.category in categories })
         }.filter { it.devices.isNotEmpty() }
-        return BackupPayload(
-            fileName = BackupWriter.fileName(format, now),
+        BackupPayload(
+            fileName = fileName,
             format = format,
             text = BackupWriter.write(format, bundles, categories, now),
             sessionCount = bundles.size,
@@ -51,6 +58,12 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
         Log.i(TAG, "Backup written: ${payload.fileName} (${payload.sessionCount} sessions, ${payload.deviceCount} devices)")
     }
 
+    /**
+     * Merge [backup] into the database. Missing sessions and detections are inserted; a detection
+     * that already exists is combined with [mergeDetection], so a row that kept accumulating
+     * sightings after the backup was taken is never regressed. `devicesUpdated` counts only rows
+     * that actually changed.
+     */
     suspend fun restore(backup: ParsedBackup, categories: Set<DeviceCategory>): RestoreResult {
         val filtered = backup.filtered(categories)
         var sessionsAdded = 0; var sessionsMerged = 0; var devicesAdded = 0; var devicesUpdated = 0
@@ -62,9 +75,15 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
                 } else {
                     sessionsMerged++
                 }
-                val existing = db.detectionDao().getBySession(b.session.id).map { it.macAddress }.toSet()
-                b.devices.forEach { if (it.macAddress in existing) devicesUpdated++ else devicesAdded++ }
-                if (b.devices.isNotEmpty()) db.detectionDao().upsertAll(b.devices)
+                val existing = db.detectionDao().getBySession(b.session.id).associateBy { it.macAddress }
+                val toWrite = b.devices.mapNotNull { incoming ->
+                    val local = existing[incoming.macAddress]
+                    when {
+                        local == null -> { devicesAdded++; incoming }
+                        else -> mergeDetection(local, incoming).takeIf { it != local }?.also { devicesUpdated++ }
+                    }
+                }
+                if (toWrite.isNotEmpty()) db.detectionDao().upsertAll(toWrite)
             }
         }
         Log.i(TAG, "Restore: +$sessionsAdded sessions, $sessionsMerged merged, +$devicesAdded devices, $devicesUpdated updated")

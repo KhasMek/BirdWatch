@@ -152,8 +152,9 @@ fun RestoreDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Restoring merges: sessions you already have keep everything and gain any missing " +
-                        "detections; sessions you don't have are added.",
+                    "Restoring merges: sessions you don't have are added; sessions you already have gain any " +
+                        "missing detections. A detection that exists in both keeps its most recent record and " +
+                        "its higher sighting count, so nothing on the phone is rolled back.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

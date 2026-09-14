@@ -1,5 +1,6 @@
 package com.khasmek.birdwatch.ui.screens
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
@@ -63,18 +64,28 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun saveMapsApiKey(input: String, onResult: (SaveResult) -> Unit) {
         val key = input.trim()
         if (key.isEmpty()) {
-            viewModelScope.launch { secure.setMapsApiKey(null); onResult(SaveResult.Cleared) }
+            clearMapsApiKey(onResult)
             return
         }
         if (!SecureSettings.looksLikeGoogleApiKey(key)) {
             onResult(SaveResult.Rejected("That doesn't look like a Google API key (39 characters, starts with AIza)."))
             return
         }
-        viewModelScope.launch { secure.setMapsApiKey(key); onResult(SaveResult.Saved) }
+        store(key, SaveResult.Saved, onResult)
     }
 
-    fun clearMapsApiKey(onResult: (SaveResult) -> Unit) {
-        viewModelScope.launch { secure.setMapsApiKey(null); onResult(SaveResult.Cleared) }
+    fun clearMapsApiKey(onResult: (SaveResult) -> Unit) = store(null, SaveResult.Cleared, onResult)
+
+    /** The encrypted store can fail (Keystore trouble); report it instead of crashing the app. */
+    private fun store(key: String?, success: SaveResult, onResult: (SaveResult) -> Unit) {
+        viewModelScope.launch {
+            val result = runCatching { secure.setMapsApiKey(key) }
+                .fold(onSuccess = { success }, onFailure = { e ->
+                    Log.e(TAG, "Could not write the Maps key", e)
+                    SaveResult.Rejected("Couldn't save the key: ${e.message ?: e::class.simpleName}")
+                })
+            onResult(result)
+        }
     }
 
     fun setAudioAlerts(enabled: Boolean) = settings.setAudioAlerts(enabled)
@@ -84,6 +95,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun playTestChirp() = container.alertSounds.playTest()
 
     companion object {
+        private const val TAG = "BirdWatch/Settings"
         const val HELP_URL = "https://developers.google.com/maps/documentation/android-sdk/get-api-key"
     }
 }

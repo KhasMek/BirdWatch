@@ -39,11 +39,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Nothing leaves the phone via Google's cloud backup or device transfer: allowBackup=false
+         for Android 8 - 11, data_extraction_rules (exclude everything) for 12+. The detections
+         database is a GPS trace of surveillance hardware and the encrypted Maps key cannot be
+         decrypted on another device anyway. Use Sessions > Back up… to move data. -->
     <application
         android:name=".BirdWatchApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -56,10 +60,12 @@
             android:name="com.google.android.geo.API_KEY"
             android:value="" />
 
+        <!-- singleTask: the USB_DEVICE_ATTACHED filter below would otherwise stack a second copy of
+             the activity on top of a running one every time the ESP32 is plugged in. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.BirdWatch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

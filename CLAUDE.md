@@ -169,8 +169,8 @@ the records into a new, already-ended session with `label = "ESP32 import (memor
 (schema v3). Stored records use method names WITHOUT the `wifi_` prefix and the tier-1 label
 `oui_addr1_addr3`; `FirmwareLineParser.methodFromStoredName` normalises them. Records have only
 device-uptime timestamps and no GPS: `lastSeen` is anchored at import time, the first-to-last span
-is preserved, coordinates stay null. UI: USB icon on the Sessions tab. Beep-mask control over
-serial remains an optional extra.
+is preserved, coordinates stay null. UI: "Import from ESP32…" in the Sessions overflow menu.
+Beep-mask control over serial remains an optional extra.
 
 **Export restore** (done): `data/ExportReader.kt` (pure) parses the app's own JSON and CSV
 exports back into an `ImportedSession` (KML refused; foreign files rejected with a message);
@@ -181,11 +181,25 @@ exports back into an `ImportedSession` (KML refused; foreign files rejected with
 **Backup / restore / delete-all** (done): `data/Backup.kt` has `BackupWriter` (JSON = header +
 `sessions[]` each in the export shape; CSV = export CSV with many session ids; KML = one Folder
 per session, export-only) and `BackupReader` (JSON/CSV, also accepts a single-session export).
-`BackupManager` builds category-filtered backups, writes to a SAF uri (`CreateDocument`), and
-**merges** on restore (insert missing sessions, upsert devices by session+MAC) returning counts;
-`deleteAll` wipes both tables. Sessions overflow menu: Import from ESP32…, Import session…,
-| Back up…, Restore…, | Delete all data…. Per-session export/share is unchanged on purpose.
-`BackupTest` covers round-trips, filtering, and rejection.
+`BackupManager` builds category-filtered backups (off the main thread), writes to a SAF uri
+(`CreateDocument`), and **merges** on restore: missing sessions/devices are inserted, an
+existing device is combined with `mergeDetection` (newer record wins per-sighting fields; span,
+sightings, tier and a learned name are the max of both) so an old backup never regresses a row;
+`devicesUpdated` counts only rows that changed. `deleteAll` wipes both tables. Sessions overflow
+menu: Import from ESP32…, Import session…, | Back up…, Restore…, | Delete all data….
+Per-session export/share is unchanged on purpose. CSV is read by a record-level tokenizer
+(`ExportReader.parseCsvRecords`) because quoted cells may contain line breaks.
+`SessionsViewModel` never hands results back through screen callbacks (the screen's launchers
+are unregistered once it leaves composition): outcomes are `uiState` fields (`saveRequest`,
+`parsedRestore`) the screen reacts to in `LaunchedEffect`, plus a `messages` flow it toasts. The
+backup recipe (categories/format/file name) is kept in `SavedStateHandle` so the payload can be
+rebuilt if the process dies while the picker is open. `BackupTest` covers round-trips, filtering,
+merge rules and rejection.
+
+**No system backup**: the manifest sets `allowBackup="false"`, `fullBackupContent="false"` and a
+`data_extraction_rules.xml` that excludes everything, so the detections DB and the encrypted
+settings never leave the phone via Google backup or device transfer. `SecureSettings` resets an
+undecryptable prefs file instead of failing every write.
 
 ### B. Phone BLE (secondary, done) — all 5 methods from the BLE-era firmware
 
@@ -217,6 +231,16 @@ USB access uses the USB host permission dialog, not a manifest permission.
 ### Background scanning
 Phase 6 adds a foreground service of type `connectedDevice` that owns both the BLE scanner and the
 USB reader. `SCAN_MODE_LOW_LATENCY` in foreground, `SCAN_MODE_LOW_POWER` when backgrounded.
+
+**Scan restarts are rationed.** Every mode switch is a `stopScan` + `startScan`, and the Bluetooth
+stack refuses a start once an app has stopped five scans inside 30 s (reported only via
+`onScanFailed`, and before this fix never retried). So: the service waits 10 s after the app
+leaves the foreground before dropping to LOW_POWER (a screen that flicks off and on costs
+nothing), and `BleScanner` keeps a `ScanRestartBudget` of its own stops, defers a mode switch
+that would exceed it, and retries a failed start with backoff while the session wants to scan.
+All start/stop/mode transitions run under one lock because they arrive from the main thread,
+a Default dispatcher and the binder thread. `MainActivity` is `singleTask` so the
+`USB_DEVICE_ATTACHED` filter does not stack a second instance.
 
 ### User-provided Google Maps API key (Phase 7)
 No key ships in source, build config, or manifest. The manifest carries an empty

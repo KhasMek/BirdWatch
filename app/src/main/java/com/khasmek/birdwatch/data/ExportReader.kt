@@ -51,10 +51,16 @@ object ExportReader {
     fun parseJson(text: String): ImportedSession {
         val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull()
             ?: throw ImportFormatException("File is not valid JSON")
+        return parseJson(root)
+    }
+
+    /** Parse an already-decoded export document (`{"session": {...}, "devices": [...]}`). */
+    fun parseJson(root: JsonObject): ImportedSession {
         val sessionObj = root["session"] as? JsonObject ?: throw ImportFormatException("JSON has no \"session\" object; not a BirdWatch export")
         val id = sessionObj.str("id")?.takeIf { it.isNotBlank() } ?: throw ImportFormatException("Session has no id")
         val startedAt = sessionObj.str("started_at")?.let(::epoch) ?: throw ImportFormatException("Session has no started_at")
         val endedAt = sessionObj.str("ended_at")?.let(::epoch)
+        val label = sessionObj.str("label")
         val devicesArr = root["devices"] as? JsonArray ?: JsonArray(emptyList())
 
         val devices = devicesArr.mapIndexedNotNull { i, el ->
@@ -92,23 +98,31 @@ object ExportReader {
         }.distinctBy { it.macAddress }
 
         return ImportedSession(
-            session = ScanSession(id = id, startedAt = startedAt, endedAt = endedAt ?: (devices.maxOfOrNull { it.lastSeen } ?: startedAt)),
+            session = ScanSession(
+                id = id,
+                startedAt = startedAt,
+                endedAt = endedAt ?: (devices.maxOfOrNull { it.lastSeen } ?: startedAt),
+                label = label,
+            ),
             devices = devices,
             format = ExportFormat.JSON,
         )
     }
 
     fun parseCsv(text: String): ImportedSession {
-        val lines = text.lines().filter { it.isNotBlank() }
-        if (lines.isEmpty()) throw ImportFormatException("CSV file is empty")
-        val header = splitCsvLine(lines.first())
+        val records = parseCsvRecords(text)
+        if (records.isEmpty()) throw ImportFormatException("CSV file is empty")
+        return parseCsvRows(records.first(), records.drop(1))
+    }
+
+    /** Build a session from a header record and its data records (all of one session id). */
+    fun parseCsvRows(header: List<String>, rows: List<List<String>>): ImportedSession {
         val col = header.withIndex().associate { (i, name) -> name to i }
         val required = listOf("session_id", "mac_address", "detection_method", "device_type", "rssi", "first_seen", "last_seen")
         required.firstOrNull { it !in col }?.let { throw ImportFormatException("CSV is missing the \"$it\" column; not a BirdWatch export") }
 
         fun row(cells: List<String>, name: String): String? = col[name]?.let { cells.getOrNull(it) }?.takeIf { it.isNotEmpty() }
 
-        val rows = lines.drop(1).map(::splitCsvLine)
         if (rows.isEmpty()) throw ImportFormatException("CSV has a header but no rows")
         val sessionIds = rows.mapNotNull { row(it, "session_id") }.distinct()
         if (sessionIds.size != 1) throw ImportFormatException("CSV must contain exactly one session (found ${sessionIds.size})")
@@ -155,24 +169,41 @@ object ExportReader {
 
     // ------------------------------------------------------------------
 
-    /** RFC 4180-style split: quoted cells may contain commas and doubled quotes. */
-    fun splitCsvLine(line: String): List<String> {
-        val out = mutableListOf<String>()
+    /**
+     * RFC 4180 tokenizer over the whole text: quoted cells may contain commas, doubled quotes and
+     * line breaks (a BLE name or SSID can carry a newline, and [ExportWriter.csvCell] quotes
+     * it). Records are split on LF, CR or CRLF outside quotes; blank records are skipped.
+     */
+    fun parseCsvRecords(text: String): List<List<String>> {
+        val records = mutableListOf<List<String>>()
+        var cells = mutableListOf<String>()
         val sb = StringBuilder()
         var quoted = false
+
+        fun endRecord() {
+            cells += sb.toString()
+            sb.clear()
+            if (cells.size > 1 || cells[0].isNotBlank()) records += cells
+            cells = mutableListOf()
+        }
+
         var i = 0
-        while (i < line.length) {
-            val c = line[i]
+        while (i < text.length) {
+            val c = text[i]
             when {
-                quoted && c == '"' && i + 1 < line.length && line[i + 1] == '"' -> { sb.append('"'); i++ }
+                quoted && c == '"' && i + 1 < text.length && text[i + 1] == '"' -> { sb.append('"'); i++ }
                 c == '"' -> quoted = !quoted
-                c == ',' && !quoted -> { out += sb.toString(); sb.clear() }
+                !quoted && c == ',' -> { cells += sb.toString(); sb.clear() }
+                !quoted && (c == '\n' || c == '\r') -> {
+                    if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++
+                    endRecord()
+                }
                 else -> sb.append(c)
             }
             i++
         }
-        out += sb.toString()
-        return out
+        if (sb.isNotEmpty() || cells.isNotEmpty()) endRecord() // last record without a trailing newline
+        return records
     }
 
     private fun epoch(iso: String): Long = try {
