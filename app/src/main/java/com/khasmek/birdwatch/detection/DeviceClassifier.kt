@@ -223,8 +223,11 @@ object DeviceClassifier {
     /**
      * Classify a WiFi access point seen by the phone's own WiFi scan. Only the BSSID's OUI is
      * usable: Core Flock / SoundThinking prefixes first, then WiFi-scoped OUI signatures from the
-     * enabled packs. SSID is carried through as the device name but never matched (no vendor has a
-     * confirmed fixed SSID pattern yet; see docs/SIGNATURES.md).
+     * enabled packs. The contract-manufacturer prefixes (Liteon / USI) are deliberately NOT
+     * consulted here: they belong to generic WiFi modules found in routers and laptops, so on the
+     * AP scan they would flag half a street; docs/SIGNATURES.md scopes them to BLE only. SSID is
+     * carried through as the device name but never matched (no vendor has a confirmed fixed SSID
+     * pattern yet).
      */
     fun classifyWifiAp(bssid: String, enabledPacks: Set<PackId> = emptySet()): Classification? {
         val prefix = macPrefix(bssid)
@@ -233,9 +236,6 @@ object DeviceClassifier {
         }
         if (prefix in DetectionSignatures.SOUNDTHINKING_MAC_PREFIXES) {
             return Classification(DetectionMethod.WIFI_AP_OUI, DeviceType.SOUNDTHINKING, Confidence.HIGH, prefix)
-        }
-        if (prefix in DetectionSignatures.FLOCK_CONTRACT_MFR_MAC_PREFIXES) {
-            return Classification(DetectionMethod.WIFI_AP_OUI, DeviceType.FLOCK, Confidence.LOW, prefix)
         }
         for (pack in SignaturePacks.OPTIONAL) {
             if (pack.id !in enabledPacks) continue

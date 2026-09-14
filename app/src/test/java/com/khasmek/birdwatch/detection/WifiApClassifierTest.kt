@@ -18,7 +18,15 @@ class WifiApClassifierTest {
         assertNull(flock.pack)
 
         assertEquals(DeviceType.SOUNDTHINKING, DeviceClassifier.classifyWifiAp("d4:11:d6:00:00:01")!!.deviceType)
-        assertEquals(Confidence.LOW, DeviceClassifier.classifyWifiAp("f4:6a:dd:00:00:01")!!.confidence) // contract mfr
+    }
+
+    @Test
+    fun `contract-manufacturer OUIs are BLE-only and never match an access point`() {
+        // Liteon / USI modules are in ordinary routers and laptops; SIGNATURES.md §2.1 scopes them to BLE.
+        DetectionSignatures.FLOCK_CONTRACT_MFR_MAC_PREFIXES.forEach { prefix ->
+            assertNull(prefix, DeviceClassifier.classifyWifiAp("$prefix:00:00:01", all))
+        }
+        assertEquals(Confidence.LOW, DeviceClassifier.classify(BleAdvertisement("f4:6a:dd:00:00:01"))!!.confidence)
     }
 
     @Test

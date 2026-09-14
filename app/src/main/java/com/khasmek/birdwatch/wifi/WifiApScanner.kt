@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.khasmek.birdwatch.detection.Classification
@@ -77,7 +78,12 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
-                WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> processResults()
+                WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> {
+                    // A failed scan is re-broadcast with the previous list and updated=false; the
+                    // results in it were already recorded (with their own position) the first time.
+                    if (intent.getBooleanExtra(WifiManager.EXTRA_RESULTS_UPDATED, true)) processResults()
+                    else Log.d(TAG, "Scan failed; ignoring re-broadcast of stale results")
+                }
                 WifiManager.WIFI_STATE_CHANGED_ACTION -> wifiManager?.let { wm ->
                     // WiFi toggled while scanning: refresh the warning and, if it just came on, nudge a scan.
                     val (warning, issue) = wifiWarning(wm)
@@ -114,7 +120,9 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         _status.update { it.copy(isScanning = true, error = null, errorIssue = null, warning = warning, warningIssue = issue) }
         Log.i(TAG, "WiFi AP scan started")
 
-        // Whatever the system already knows is worth a look immediately.
+        // Whatever the system already knows is worth a look immediately; processResults() drops
+        // anything older than MAX_RESULT_AGE_MS so a cached list from another street is not
+        // stamped with the current GPS fix.
         processResults()
 
         requestJob = scope.launch {
@@ -173,9 +181,14 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         _status.update { it.copy(lastResultCount = results.size, resultSets = it.resultSets + 1) }
 
         val now = System.currentTimeMillis()
+        val nowSinceBootUs = SystemClock.elapsedRealtimeNanos() / 1_000
         val fix = locationSource?.invoke()
         for (r in results) {
             val bssid = r.BSSID ?: continue
+            // ScanResult.timestamp is microseconds since boot. The list Android hands out can hold
+            // entries from earlier scans; an old entry says nothing about where the phone is now.
+            val ageMs = (nowSinceBootUs - r.timestamp) / 1_000
+            if (ageMs > MAX_RESULT_AGE_MS) continue
             val classification = DeviceClassifier.classifyWifiAp(bssid, enabledPacks)
                 ?: remoteIdClassification(r)
                 ?: continue
@@ -256,6 +269,8 @@ class WifiApScanner(context: Context, private val scope: CoroutineScope) {
         private const val TAG = "BirdWatch/WifiAp"
         /** Stays under Android's 4-per-2-minutes foreground throttle with a little margin. */
         private const val REQUEST_INTERVAL_MS = 35_000L
+        /** Results older than this (one request interval plus slack) are treated as stale. */
+        private const val MAX_RESULT_AGE_MS = 45_000L
         private const val VENDOR_SPECIFIC_IE = 221
     }
 }

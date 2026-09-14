@@ -8,6 +8,7 @@ import com.khasmek.birdwatch.detection.BleScanner
 import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DetectionTable
 import com.khasmek.birdwatch.detection.ScanForegroundService
+import com.khasmek.birdwatch.detection.SourceMerge
 import com.khasmek.birdwatch.location.LocationProvider
 import com.khasmek.birdwatch.usb.FirmwareLineParser.toDetectedDevice
 import com.khasmek.birdwatch.usb.UsbCompanion
@@ -19,12 +20,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.sample
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,10 +44,13 @@ import java.util.UUID
  * user has switched it on, the phone WiFi access-point scanner. Stopping flushes every in-memory
  * table, stops the radios and closes the session row.
  *
- * Persistence strategy, per source:
- *  - a brand-new MAC is written immediately (from the table's `newDetections`);
+ * Persistence strategy:
+ *  - a brand-new MAC is written immediately (from the tables' `newDetections`, de-duplicated
+ *    across sources so a device two radios hear alerts and inserts once);
  *  - re-sightings (RSSI, lastSeen, GPS, count, tier upgrades) are batched every
- *    [RESIGHT_FLUSH_MS] via `sample` so a chatty beacon does not hammer the database.
+ *    [RESIGHT_FLUSH_MS] via `sample`, after folding all three tables into one row per MAC
+ *    with [SourceMerge], so a chatty beacon does not hammer the database and two sources never
+ *    overwrite each other's row.
  */
 class SessionManager(
     context: Context,
@@ -65,18 +73,38 @@ class SessionManager(
     private val mutex = Mutex()
     private var persistJob: Job? = null
 
-    /** First sighting of every MAC from any source. Drives audio alerts. */
+    /** MACs already announced this session, across every source, so a device two radios hear alerts once. */
+    private val seenMacs = HashSet<String>()
+
+    /**
+     * First sighting of every MAC from any source. Drives audio alerts and the immediate write of
+     * a new row. Shared so the alert collector and the persist loop both see every emission after
+     * the cross-source de-duplication.
+     */
     val newDetections: Flow<DetectedDevice> =
         merge(bleScanner.table.newDetections, usbCompanion.table.newDetections, wifiApScanner.table.newDetections)
+            .filter { d -> synchronized(seenMacs) { seenMacs.add(DetectionTable.normalizeMac(d.macAddress)) } }
+            .shareIn(scope, SharingStarted.Eagerly)
+
+    /**
+     * Every source's table folded into one row per MAC ([SourceMerge]); what the 2 s flush writes.
+     * A device heard by two radios is one database row with the stronger evidence and the summed
+     * sightings, instead of two loops overwriting each other.
+     */
+    private val mergedDevices: Flow<List<DetectedDevice>> =
+        combine(bleScanner.devices, usbCompanion.devices, wifiApScanner.devices) { b, u, w -> SourceMerge.mergeAll(b + u + w) }
 
     init {
         // Any session left open by a crash/kill is closed now so it shows up in history.
         scope.launch { sessionDao.closeOpenSessions(System.currentTimeMillis()) }
-        // The WiFi AP scan switch takes effect mid-session too.
+        // The WiFi AP scan switch takes effect mid-session too. Under the mutex so a toggle cannot
+        // land between stopSuspending() stopping the scanner and clearing the session.
         scope.launch {
             settings.wifiApScan.collect { enabled ->
-                if (!isActive) return@collect
-                if (enabled) wifiApScanner.start() else wifiApScanner.stop()
+                mutex.withLock {
+                    if (!isActive) return@withLock
+                    if (enabled) wifiApScanner.start() else wifiApScanner.stop()
+                }
             }
         }
     }
@@ -109,6 +137,7 @@ class SessionManager(
 
         val fixSource = { locationProvider.currentFix() }
 
+        synchronized(seenMacs) { seenMacs.clear() }
         bleScanner.clear()
         bleScanner.sessionId = session.id
         bleScanner.locationSource = fixSource
@@ -145,7 +174,7 @@ class SessionManager(
         persistJob = null
 
         // Final flush so the last few re-sightings land in the database.
-        val snapshot = bleScanner.table.snapshot() + usbCompanion.table.snapshot() + wifiApScanner.table.snapshot()
+        val snapshot = SourceMerge.mergeAll(allRows())
         if (snapshot.isNotEmpty()) detectionDao.upsertAll(snapshot)
 
         sessionDao.update(session.copy(endedAt = System.currentTimeMillis()))
@@ -228,20 +257,25 @@ class SessionManager(
 
     // ------------------------------------------------------------------
 
-    private suspend fun persistLoop() = coroutineScope {
-        launch { persist(bleScanner.table) }
-        launch { persist(usbCompanion.table) }
-        launch { persist(wifiApScanner.table) }
-    }
-
     @OptIn(FlowPreview::class)
-    private suspend fun persist(table: DetectionTable) = coroutineScope {
-        launch { table.newDetections.collect { detectionDao.upsert(it) } }
+    private suspend fun persistLoop() = coroutineScope {
+        // A brand-new MAC lands immediately, already merged with anything another radio has on it.
+        launch { newDetections.collect { detectionDao.upsert(mergedRowFor(it)) } }
+        // Re-sightings from every source, batched.
         launch {
-            table.devices.sample(RESIGHT_FLUSH_MS).collect { devices ->
+            mergedDevices.sample(RESIGHT_FLUSH_MS).collect { devices ->
                 if (devices.isNotEmpty()) detectionDao.upsertAll(devices)
             }
         }
+    }
+
+    private fun allRows(): List<DetectedDevice> =
+        bleScanner.table.snapshot() + usbCompanion.table.snapshot() + wifiApScanner.table.snapshot()
+
+    private fun mergedRowFor(d: DetectedDevice): DetectedDevice {
+        val mac = DetectionTable.normalizeMac(d.macAddress)
+        val rows = allRows().filter { DetectionTable.normalizeMac(it.macAddress) == mac }
+        return if (rows.isEmpty()) d else SourceMerge.mergeAll(rows).single()
     }
 
     companion object {

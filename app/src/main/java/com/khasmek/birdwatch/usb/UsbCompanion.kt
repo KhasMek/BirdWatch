@@ -9,6 +9,7 @@ import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import com.hoho.android.usbserial.driver.CdcAcmSerialDriver
 import com.hoho.android.usbserial.driver.ProbeTable
 import com.hoho.android.usbserial.driver.UsbSerialDriver
@@ -35,8 +36,10 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
+import kotlin.coroutines.coroutineContext
 
 enum class UsbStatus(val label: String) {
     NO_DEVICE("No ESP32 attached"),
@@ -88,7 +91,8 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
     private val _state = MutableStateFlow(UsbState())
     val state: StateFlow<UsbState> = _state.asStateFlow()
 
-    private val _messages = MutableSharedFlow<FirmwareMessage>(extraBufferCapacity = 256)
+    // Sized for a full session dump (200 records + framing) arriving while the collector is busy.
+    private val _messages = MutableSharedFlow<FirmwareMessage>(extraBufferCapacity = 1024)
     /** Every parsed line, for logging / a raw console view. */
     val messages: SharedFlow<FirmwareMessage> = _messages.asSharedFlow()
 
@@ -101,8 +105,11 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
     /** While true, an attached device is opened automatically (set by SessionManager). */
     @Volatile var wantConnection: Boolean = false
 
-    private var port: UsbSerialPort? = null
-    private var readJob: Job? = null
+    // Touched from the main thread (receiver, connect), the IO reader and the session mutex holder.
+    @Volatile private var port: UsbSerialPort? = null
+    @Volatile private var readJob: Job? = null
+    /** The device behind [port], to tell our detach broadcast from another USB device's. */
+    @Volatile private var openDevice: UsbDevice? = null
     private val permissionAction = "${appContext.packageName}.USB_PERMISSION"
 
     private val receiver = object : BroadcastReceiver() {
@@ -119,9 +126,16 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
                     if (wantConnection) connect() else refreshPresence()
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    Log.i(TAG, "USB device detached")
-                    closePort()
-                    _state.update { it.copy(status = UsbStatus.NO_DEVICE, deviceDescription = null) }
+                    val detached = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+                    val ours = openDevice
+                    if (ours != null && detached != null && detached.deviceName != ours.deviceName) {
+                        // Something else on the hub was unplugged; the ESP32 is still with us.
+                        Log.i(TAG, "USB device detached (${detached.deviceName}); not the ESP32")
+                    } else {
+                        Log.i(TAG, "USB device detached")
+                        closePort()
+                        refreshPresence()
+                    }
                 }
             }
         }
@@ -174,10 +188,13 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
         Log.i(TAG, "Disconnected")
     }
 
-    /** Send one command line to the firmware, e.g. `{"cmd":"get_config"}`. */
-    fun send(line: String): Boolean {
-        val p = port ?: return false
-        return try {
+    /**
+     * Send one command line to the firmware, e.g. `{"cmd":"get_config"}`. The write can block
+     * for up to [WRITE_TIMEOUT_MS], so it runs on IO.
+     */
+    suspend fun send(line: String): Boolean = withContext(Dispatchers.IO) {
+        val p = port ?: return@withContext false
+        try {
             p.write((line.trimEnd('\n') + "\n").toByteArray(Charsets.UTF_8), WRITE_TIMEOUT_MS)
             true
         } catch (e: IOException) {
@@ -186,7 +203,9 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    fun requestConfig() = send("""{"cmd":"get_config"}""")
+    fun requestConfig() {
+        scope.launch { send("""{"cmd":"get_config"}""") }
+    }
 
     fun clear() = table.clear()
 
@@ -279,6 +298,7 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
             return
         }
         port = p
+        openDevice = driver.device
         _state.update { it.copy(status = UsbStatus.CONNECTED, linesReceived = 0, detectionsReceived = 0) }
         Log.i(TAG, "Connected to ${driver.device.describe()} @ $BAUD")
         readJob = scope.launch(Dispatchers.IO) { readLoop(p) }
@@ -288,15 +308,20 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
     private fun closePort() {
         readJob?.cancel()
         readJob = null
+        openDevice = null
         val p = port ?: return
         port = null
         try { p.close() } catch (_: IOException) {}
     }
 
+    /**
+     * Reads until cancelled or the port is closed. Lines are split on the raw bytes and decoded
+     * one at a time, so a multi-byte UTF-8 character straddling two reads survives.
+     */
     private suspend fun readLoop(p: UsbSerialPort) {
         val buf = ByteArray(READ_BUFFER_BYTES)
-        val pending = StringBuilder()
-        while (scope.isActive && port === p) {
+        var pending = ByteArray(0) // bytes after the last newline
+        while (coroutineContext.isActive && port === p) {
             val n = try {
                 p.read(buf, READ_TIMEOUT_MS)
             } catch (e: IOException) {
@@ -308,18 +333,23 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
                 return
             }
             if (n <= 0) continue
-            pending.append(String(buf, 0, n, Charsets.UTF_8))
-
-            var nl = pending.indexOf('\n')
-            while (nl >= 0) {
-                val line = pending.substring(0, nl)
-                pending.delete(0, nl + 1)
-                handleLine(line)
-                nl = pending.indexOf('\n')
+            val data = if (pending.isEmpty()) buf.copyOf(n) else pending + buf.copyOf(n)
+            var start = 0
+            while (true) {
+                val nl = indexOfNewline(data, start)
+                if (nl < 0) break
+                handleLine(String(data, start, nl - start, Charsets.UTF_8))
+                start = nl + 1
             }
+            pending = if (start >= data.size) ByteArray(0) else data.copyOfRange(start, data.size)
             // Guard against a runaway line with no newline.
-            if (pending.length > MAX_LINE_CHARS) pending.setLength(0)
+            if (pending.size > MAX_LINE_BYTES) pending = ByteArray(0)
         }
+    }
+
+    private fun indexOfNewline(data: ByteArray, from: Int): Int {
+        for (i in from until data.size) if (data[i] == NEWLINE) return i
+        return -1
     }
 
     private fun handleLine(line: String) {
@@ -365,7 +395,8 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
         private const val READ_TIMEOUT_MS = 250
         private const val WRITE_TIMEOUT_MS = 500
         private const val READ_BUFFER_BYTES = 4096
-        private const val MAX_LINE_CHARS = 16_384
+        private const val MAX_LINE_BYTES = 16_384
+        private const val NEWLINE = '\n'.code.toByte()
         /** 200 records at 115200 baud is well under a second; the margin covers flash reads. */
         private const val DUMP_TIMEOUT_MS = 20_000L
 

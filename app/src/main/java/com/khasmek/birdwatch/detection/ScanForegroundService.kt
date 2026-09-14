@@ -79,8 +79,12 @@ class ScanForegroundService : LifecycleService() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(processObserver)
     }
 
+    /** Most recent start id, so a stop never swallows a start request that arrived after it. */
+    private var lastStartId = -1
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        lastStartId = startId
         when (intent?.action) {
             ACTION_STOP -> {
                 Log.i(TAG, "Stop requested")
@@ -135,7 +139,10 @@ class ScanForegroundService : LifecycleService() {
                 .collect {
                     Log.i(TAG, "Session ended; stopping service")
                     ServiceCompat.stopForeground(this@ScanForegroundService, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                    stopSelf()
+                    // stopSelfResult: if a newer start (Stop tapped, then Start again) has already
+                    // been issued, this is ignored and that start's onStartCommand runs instead of
+                    // being dropped with the service.
+                    if (!stopSelfResult(lastStartId)) Log.i(TAG, "A newer start is pending; staying up")
                 }
         }
 

@@ -135,7 +135,11 @@ data class ScanSession(@PrimaryKey val id: String, val startedAt: Long, val ende
 ```
 
 Dedupe is per (session, MAC). A re-sighting updates rssi, lastSeen, sightings, GPS, and keeps a
-name once learned. `SessionManager` writes new MACs immediately and batches re-sightings every 2 s.
+name once learned. Each radio has its own in-memory `DetectionTable`; `SessionManager` folds them
+into one row per MAC with `detection/SourceMerge.kt` (stronger evidence wins identity fields,
+the newer sighting wins RSSI/GPS, sightings add up) before every write, and de-duplicates
+`newDetections` across sources so a device two radios hear alerts once. New MACs are written
+immediately, re-sightings batched every 2 s.
 
 ## Detection logic
 
@@ -288,7 +292,11 @@ All eight phases are complete. Remaining hardware validation: live ESP32 USB ser
    - 9b — **done**: `wifi/WifiApScanner.kt` is a third `DetectionSource` (`PHONE_WIFI`). It
      listens for the system's own scan results and requests one every 35 s (Android throttle:
      4 per 2 min foreground). `DeviceClassifier.classifyWifiAp(bssid, packs)` matches Core OUIs
-     then WiFi-scoped pack OUIs (`Signature.Oui.radios`). Adds the Drones pack (DJI, Parrot,
+     then WiFi-scoped pack OUIs (`Signature.Oui.radios`); the Liteon/USI contract-manufacturer
+     prefixes are BLE-only and never matched on an AP. Results older than 45 s (by
+     `ScanResult.timestamp`) and the stale re-broadcast after a failed scan
+     (`EXTRA_RESULTS_UPDATED=false`) are ignored so an old AP is never stamped with the current
+     GPS fix. Adds the Drones pack (DJI, Parrot,
      Skydio) and the WiFi-only LE vendors (WatchGuard, Digital Ally, Utility). Separate
      "Phone WiFi access-point scan" switch in Settings, off by default; needs
      ACCESS_WIFI_STATE + CHANGE_WIFI_STATE. Rooted tip: `settings put global
