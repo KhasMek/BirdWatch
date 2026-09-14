@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
 import com.khasmek.birdwatch.detection.DetectedDevice
+import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.location.GeoFix
 import com.khasmek.birdwatch.util.MapsKeyInjector
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -26,12 +27,27 @@ data class MapUiState(
     val staleKey: Boolean = false,
     val scope: MapScope = MapScope.ALL_SESSIONS,
     val devices: List<DetectedDevice> = emptyList(),
+    /** Categories the user has switched off with the chips above the map. */
+    val hidden: Set<DeviceCategory> = emptySet(),
     val sessionActive: Boolean = false,
     val fix: GeoFix? = null,
 ) {
     val hasKey: Boolean get() = !apiKey.isNullOrBlank()
-    val mappable: List<DetectedDevice> get() = devices.filter { it.hasLocation || it.hasTargetLocation || it.hasOperatorLocation }
-    val unmappedCount: Int get() = devices.size - mappable.size
+
+    /** Devices that have somewhere to be drawn, before the category filter. */
+    val located: List<DetectedDevice> = devices.filter { it.hasLocation || it.hasTargetLocation || it.hasOperatorLocation }
+
+    /** What is actually drawn: located devices whose category is not hidden. */
+    val mappable: List<DetectedDevice> = located.filter { it.deviceType.category !in hidden }
+
+    val unmappedCount: Int get() = devices.size - located.size
+    val hiddenCount: Int get() = located.size - mappable.size
+
+    /** Categories with at least one located device, in enum order; drives the filter chips. */
+    val presentCategories: List<DeviceCategory>
+        get() = DeviceCategory.entries.filter { c -> located.any { it.deviceType.category == c } }
+
+    fun locatedCount(category: DeviceCategory): Int = located.count { it.deviceType.category == category }
 }
 
 class MapViewModel(private val container: AppContainer) : ViewModel() {
@@ -40,6 +56,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     private val sessionManager = container.sessionManager
 
     private val _scope = MutableStateFlow(MapScope.ALL_SESSIONS)
+    private val _hidden = MutableStateFlow<Set<DeviceCategory>>(emptySet())
     private val _mapsReady = MutableStateFlow(MapsKeyInjector.isInitialized)
     private val _mapsInitFailed = MutableStateFlow(false)
 
@@ -76,6 +93,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         )
     }.combine(sessionManager.currentSession) { s, session -> s.copy(sessionActive = session != null) }
         .combine(container.locationProvider.state) { s, loc -> s.copy(fix = loc.fix) }
+        .combine(_hidden) { s, hidden -> s.copy(hidden = hidden) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())
 
     /** Inject the stored key into the Maps SDK. Safe to call on every entry to the map screen. */
@@ -87,4 +105,9 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setScope(scope: MapScope) { _scope.value = scope }
+
+    /** Show or hide one category's markers. */
+    fun toggleCategory(category: DeviceCategory) {
+        _hidden.value = if (category in _hidden.value) _hidden.value - category else _hidden.value + category
+    }
 }

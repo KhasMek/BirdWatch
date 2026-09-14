@@ -1,5 +1,6 @@
 package com.khasmek.birdwatch.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,8 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -55,6 +58,7 @@ import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.DeviceCard
+import com.khasmek.birdwatch.ui.components.categoryIcon
 import com.khasmek.birdwatch.ui.components.coords
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.Permissions
@@ -104,7 +108,7 @@ fun MapScreen(
                     title = "Maps SDK failed to initialise",
                     body = "Google Play services may be missing or out of date on this device.",
                 )
-                state.mapsReady -> MapContent(state, onScopeChange = viewModel::setScope)
+                state.mapsReady -> MapContent(state, onScopeChange = viewModel::setScope, onToggleCategory = viewModel::toggleCategory)
             }
         }
     }
@@ -112,7 +116,11 @@ fun MapScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
+private fun MapContent(
+    state: MapUiState,
+    onScopeChange: (MapScope) -> Unit,
+    onToggleCategory: (DeviceCategory) -> Unit,
+) {
     val context = LocalContext.current
     val hasLocationPermission = remember { Permissions.allEssentialGranted(context) }
     val cameraPositionState = rememberCameraPositionState {
@@ -154,33 +162,70 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
     }
 
     // The sheet shows the live row for the tapped marker (RSSI, sightings, drone position keep
-    // updating during a session). If the row is gone (session deleted), the sheet closes.
-    val selectedDevice = selection?.let { sel -> state.devices.firstOrNull(sel::matches) }
+    // updating during a session). If the row is gone (session deleted) or its category was just
+    // hidden with the chips, the sheet closes.
+    val selectedDevice = selection?.let { sel -> mappable.firstOrNull(sel::matches) }
     LaunchedEffect(selection, selectedDevice == null) { if (selection != null && selectedDevice == null) selectionKey = null }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MapScope.entries.forEach { scope ->
-                    FilterChip(
-                        selected = state.scope == scope,
-                        onClick = { onScopeChange(scope) },
-                        label = { Text(scope.label) },
-                        enabled = scope != MapScope.CURRENT_SESSION || state.sessionActive,
+            Column {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    MapScope.entries.forEach { scope ->
+                        FilterChip(
+                            selected = state.scope == scope,
+                            onClick = { onScopeChange(scope) },
+                            label = { Text(scope.label) },
+                            enabled = scope != MapScope.CURRENT_SESSION || state.sessionActive,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = buildString {
+                            append("${mappable.size} on map")
+                            if (state.hiddenCount > 0) append(" · ${state.hiddenCount} hidden")
+                            if (state.unmappedCount > 0) append(" · ${state.unmappedCount} no GPS")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.End,
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = "${mappable.size} on map" + if (state.unmappedCount > 0) " · ${state.unmappedCount} no GPS" else "",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Category toggles, one per category that has something to draw. Multi-select:
+                // a highlighted chip is shown on the map, a plain one is hidden.
+                val categories = state.presentCategories
+                if (categories.size > 1) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        categories.forEach { c ->
+                            val shown = c !in state.hidden
+                            FilterChip(
+                                selected = shown,
+                                onClick = { onToggleCategory(c) },
+                                label = { Text("${c.shortLabel} ${state.locatedCount(c)}") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (shown) categoryIcon(c) else Icons.Default.VisibilityOff,
+                                        contentDescription = null,
+                                        tint = if (shown) DetectionColors.textForCategory(c) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.height(16.dp),
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
             }
         }
         if (state.staleKey) {
