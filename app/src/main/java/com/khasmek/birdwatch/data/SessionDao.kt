@@ -38,6 +38,15 @@ interface SessionDao {
     @Query("DELETE FROM scan_sessions WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    @Query("DELETE FROM scan_sessions")
+    suspend fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM scan_sessions")
+    suspend fun count(): Int
+
+    @Query("SELECT * FROM scan_sessions ORDER BY startedAt DESC")
+    suspend fun getAll(): List<ScanSession>
+
     companion object {
         private const val SUMMARY_SELECT = """
             SELECT s.*,

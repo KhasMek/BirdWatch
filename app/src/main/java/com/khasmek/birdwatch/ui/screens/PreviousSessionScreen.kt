@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Videocam
@@ -32,6 +35,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -53,20 +57,27 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.data.ExportFormat
+import com.khasmek.birdwatch.data.ParsedBackup
 import com.khasmek.birdwatch.data.SessionManager
 import com.khasmek.birdwatch.data.SessionSummary
 import com.khasmek.birdwatch.ui.appViewModel
+import com.khasmek.birdwatch.ui.components.BackupDialog
 import com.khasmek.birdwatch.ui.components.ConfirmDeleteDialog
+import com.khasmek.birdwatch.ui.components.DeleteAllDialog
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
 import com.khasmek.birdwatch.ui.components.ImportFromEsp32Dialog
+import com.khasmek.birdwatch.ui.components.RestoreDialog
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
 import kotlinx.coroutines.launch
 
-/** MIME types offered to the document picker for BirdWatch export files. */
+/** MIME types offered to the document picker for BirdWatch export / backup files. */
 private val IMPORT_MIME_TYPES = arrayOf("application/json", "text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream")
 
-/** List of every scan session, newest first. Tap for details; overflow menu for export / delete. */
+/**
+ * List of every scan session, newest first. Tap for details; per-row menu for export / delete;
+ * toolbar menu for import, backup, restore and delete-all.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PreviousSessionScreen(
@@ -76,50 +87,47 @@ fun PreviousSessionScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+    fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
 
     var exportTarget by remember { mutableStateOf<SessionSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<SessionSummary?>(null) }
     var showImport by remember { mutableStateOf(false) }
+    var showBackup by remember { mutableStateOf(false) }
+    var restoreParsed by remember { mutableStateOf<ParsedBackup?>(null) }
+    var showDeleteAll by remember { mutableStateOf(false) }
 
-    // Restore one of the app's own JSON/CSV exports. OpenDocument gives a persistable, read-only
-    // grant to exactly the file the user picked.
+    // ---- launchers -------------------------------------------------------------------------
+
     val pickExport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         viewModel.importFile(uri) { result ->
-            val msg = result.fold(
-                onSuccess = { "Imported ${it.devices.size} device${if (it.devices.size == 1) "" else "s"} from ${it.format.label}" },
-                onFailure = { e ->
-                    when (e) {
-                        is SessionManager.AlreadyImportedException -> "That session is already in the app"
-                        else -> "Import failed: ${e.message}"
-                    }
-                },
-            )
-            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+            toast(result.fold(
+                onSuccess = { "Imported ${plural(it.devices.size, "device")} from ${it.format.label}" },
+                onFailure = { e -> if (e is SessionManager.AlreadyImportedException) "That session is already in the app" else "Import failed: ${e.message}" },
+            ))
         }
     }
 
-    if (showImport) {
-        // Opening the dialog also nudges a connection so a freshly plugged-in board is usable.
-        LaunchedEffect(Unit) { viewModel.connectUsb() }
-        ImportFromEsp32Dialog(
-            connected = state.usb.isConnected,
-            onDismiss = { showImport = false },
-            onImport = { source ->
-                showImport = false
-                viewModel.importFromEsp32(source) { result ->
-                    val msg = result.fold(
-                        onSuccess = { r ->
-                            if (r.imported == 0) "ESP32 ${source.label} is empty; nothing to import"
-                            else "Imported ${r.imported} device${if (r.imported == 1) "" else "s"} from ESP32 ${source.label}"
-                        },
-                        onFailure = { "Import failed: ${it.message}" },
-                    )
-                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
-                }
-            },
-        )
+    val pickBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        viewModel.parseBackup(uri) { result ->
+            result.fold(onSuccess = { restoreParsed = it }, onFailure = { toast("Can't restore: ${it.message}") })
+        }
     }
+
+    // "Save as": one launcher per format because CreateDocument fixes the MIME type up front.
+    val onBackupWritten: (Result<com.khasmek.birdwatch.data.BackupPayload>) -> Unit = { result ->
+        toast(result.fold(
+            onSuccess = { "Backed up ${plural(it.sessionCount, "session")}, ${plural(it.deviceCount, "device")} to ${it.fileName}" },
+            onFailure = { "Backup failed: ${it.message}" },
+        ))
+    }
+    val saveJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.JSON.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
+    val saveCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.CSV.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
+    val saveKml = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ExportFormat.KML.mimeType)) { viewModel.writeBackup(it, onBackupWritten) }
+
+    // ---- dialogs ---------------------------------------------------------------------------
 
     exportTarget?.let { target ->
         ExportFormatDialog(
@@ -128,8 +136,7 @@ fun PreviousSessionScreen(
                 exportTarget = null
                 scope.launch {
                     val intent = viewModel.export(target.session.id, format)
-                    if (intent == null) Toast.makeText(context, "Session not found", Toast.LENGTH_SHORT).show()
-                    else context.startActivity(intent)
+                    if (intent == null) toast("Session not found") else context.startActivity(intent)
                 }
             },
         )
@@ -141,13 +148,85 @@ fun PreviousSessionScreen(
             onConfirm = { viewModel.delete(target.session.id); deleteTarget = null },
         )
     }
+    if (showImport) {
+        // Opening the dialog also nudges a connection so a freshly plugged-in board is usable.
+        LaunchedEffect(Unit) { viewModel.connectUsb() }
+        ImportFromEsp32Dialog(
+            connected = state.usb.isConnected,
+            onDismiss = { showImport = false },
+            onImport = { source ->
+                showImport = false
+                viewModel.importFromEsp32(source) { result ->
+                    toast(result.fold(
+                        onSuccess = { r -> if (r.imported == 0) "ESP32 ${source.label} is empty; nothing to import" else "Imported ${plural(r.imported, "device")} from ESP32 ${source.label}" },
+                        onFailure = { "Import failed: ${it.message}" },
+                    ))
+                }
+            },
+        )
+    }
+    if (showBackup) {
+        BackupDialog(
+            counts = state.counts.byCategory,
+            onDismiss = { showBackup = false },
+            onBackup = { categories, format ->
+                showBackup = false
+                viewModel.prepareBackup(categories, format) { result ->
+                    result.fold(
+                        onSuccess = { payload ->
+                            when (format) {
+                                ExportFormat.JSON -> saveJson.launch(payload.fileName)
+                                ExportFormat.CSV -> saveCsv.launch(payload.fileName)
+                                ExportFormat.KML -> saveKml.launch(payload.fileName)
+                            }
+                        },
+                        onFailure = { toast("Backup failed: ${it.message}") },
+                    )
+                }
+            },
+        )
+    }
+    restoreParsed?.let { parsed ->
+        RestoreDialog(
+            backup = parsed,
+            onDismiss = { restoreParsed = null },
+            onRestore = { categories ->
+                restoreParsed = null
+                viewModel.restore(parsed, categories) { result ->
+                    toast(result.fold(
+                        onSuccess = { r ->
+                            "Restored: ${plural(r.sessionsAdded, "new session")}, ${plural(r.sessionsMerged, "merged")}, " +
+                                "${plural(r.devicesAdded, "device")} added, ${r.devicesUpdated} updated"
+                        },
+                        onFailure = { "Restore failed: ${it.message}" },
+                    ))
+                }
+            },
+        )
+    }
+    if (showDeleteAll) {
+        DeleteAllDialog(
+            sessions = state.counts.sessions,
+            devices = state.counts.devices,
+            sessionActive = state.activeSessionId != null,
+            onDismiss = { showDeleteAll = false },
+            onConfirm = {
+                showDeleteAll = false
+                viewModel.deleteAll { result ->
+                    toast(result.fold(onSuccess = { "All sessions and detections deleted" }, onFailure = { "Delete failed: ${it.message}" }))
+                }
+            },
+        )
+    }
+
+    // ---- screen ----------------------------------------------------------------------------
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Sessions") },
                 actions = {
-                    if (state.importing) {
+                    if (state.busy) {
                         CircularProgressIndicator(modifier = Modifier.padding(12.dp).size(24.dp), strokeWidth = 2.dp)
                     } else {
                         var menu by remember { mutableStateOf(false) }
@@ -164,6 +243,23 @@ fun PreviousSessionScreen(
                                 text = { Text("Import session…") },
                                 leadingIcon = { Icon(Icons.Default.FileOpen, null) },
                                 onClick = { menu = false; pickExport.launch(IMPORT_MIME_TYPES) },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Back up…") },
+                                leadingIcon = { Icon(Icons.Default.Backup, null) },
+                                onClick = { menu = false; viewModel.refreshCounts(); showBackup = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Restore…") },
+                                leadingIcon = { Icon(Icons.Default.Restore, null) },
+                                onClick = { menu = false; pickBackup.launch(IMPORT_MIME_TYPES) },
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text("Delete all data…", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = { menu = false; viewModel.refreshCounts(); showDeleteAll = true },
                             )
                         }
                     }
@@ -184,8 +280,8 @@ fun PreviousSessionScreen(
                 Spacer(Modifier.height(8.dp))
                 Text(
                     "Every scan you start from the Dashboard is saved here with its detections. " +
-                        "The menu above can import a session from an exported JSON/CSV file, or pull in what " +
-                        "the ESP32 recorded on its own.",
+                        "The menu above can import a session from an exported file, restore a backup, or pull in " +
+                        "what the ESP32 recorded on its own.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,

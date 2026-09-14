@@ -215,6 +215,15 @@ BirdWatch exported earlier, on this phone or another one, as a session with its 
 timestamps and GPS. KML can't be imported (it only carries located devices). A session that's
 already present is refused, so the same file can't be imported twice.
 
+**Backup and restore.** The Sessions menu has *Back up…* and *Restore…*. Back up writes every
+session to one file you save wherever you like (Drive, Files, an SD card), and lets you choose
+which categories to include, for example Flock cameras and body cams but not gunshot detectors.
+JSON is the full format; CSV is also restorable but drops session names and exact start/end
+times; KML is for Google Earth only. Restore reads a JSON or CSV backup, shows what's in it, lets
+you leave categories out, and *merges*: sessions you already have keep everything and gain any
+missing detections, sessions you don't have are added. *Delete all data…* wipes every session and
+detection after confirmation; settings and your Maps key stay.
+
 **Importing from the ESP32.** The board keeps its own detection table when it runs on its own
 (powered from a battery pack, say). Plug it in, open the Sessions tab and tap the download icon to
 pull either the current run (from memory) or the previous run (saved to flash at power-off) into a

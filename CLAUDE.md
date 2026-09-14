@@ -175,8 +175,17 @@ serial remains an optional extra.
 **Export restore** (done): `data/ExportReader.kt` (pure) parses the app's own JSON and CSV
 exports back into an `ImportedSession` (KML refused; foreign files rejected with a message);
 `SessionManager.importExported` keeps the original session id/timestamps/GPS, labels it
-"Imported (JSON|CSV)", and refuses an id that already exists. UI: file icon on the Sessions tab
+"Imported (JSON|CSV)", and refuses an id that already exists. UI: Sessions overflow menu
 (`OpenDocument`). `ExportReaderTest` round-trips writer -> reader.
+
+**Backup / restore / delete-all** (done): `data/Backup.kt` has `BackupWriter` (JSON = header +
+`sessions[]` each in the export shape; CSV = export CSV with many session ids; KML = one Folder
+per session, export-only) and `BackupReader` (JSON/CSV, also accepts a single-session export).
+`BackupManager` builds category-filtered backups, writes to a SAF uri (`CreateDocument`), and
+**merges** on restore (insert missing sessions, upsert devices by session+MAC) returning counts;
+`deleteAll` wipes both tables. Sessions overflow menu: Import from ESP32…, Import session…,
+| Back up…, Restore…, | Delete all data…. Per-session export/share is unchanged on purpose.
+`BackupTest` covers round-trips, filtering, and rejection.
 
 ### B. Phone BLE (secondary, done) — all 5 methods from the BLE-era firmware
 
