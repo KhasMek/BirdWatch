@@ -11,7 +11,7 @@ plugins {
 // Versioning: rolling date versions, e.g. 2026.09.1 (year.month.release-in-month).
 //
 // The release workflow passes the git tag in via BIRDWATCH_VERSION; a local build can pass
-// -PbirdwatchVersion=2026.09.1. With neither, the build is "dev" with versionCode 1.
+// -PbirdwatchVersion=2026.09.1. With neither, the build is "dev" (versionCode below).
 // versionCode is derived so Android sees each release as an upgrade: YYYYMM * 100 + N
 //   2026.09.1 -> 20260901, 2026.09.2 -> 20260902, 2026.10.1 -> 20261001   (N must be 1..99)
 // A dev build takes the current month's slot 99 (2026-09 -> 20260999): it installs over any
@@ -32,13 +32,17 @@ val releaseVersionCode: Int = requestedVersion?.let { v ->
 // ---------------------------------------------------------------------------------------------
 // Release signing. CI supplies ANDROID_KEYSTORE_* env vars from repository secrets; a local
 // signed build uses the gitignored `keystore.properties` at the repo root (see the .example).
-// With neither present, `assembleRelease` falls back to the debug key so you can still test the
-// minified build on a device. Such an APK is NOT distributable.
+// With neither present, an UNVERSIONED `assembleRelease` (version "dev") falls back to the debug
+// key so you can still test the minified build on a device; such an APK is NOT distributable.
+// A VERSIONED build (BIRDWATCH_VERSION / -PbirdwatchVersion) is a real release and refuses to
+// configure without a keystore, see below.
 // ---------------------------------------------------------------------------------------------
 val keystoreProps = Properties().apply {
     rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
-fun signingValue(env: String, prop: String): String? = System.getenv(env) ?: keystoreProps.getProperty(prop)
+// An exported-but-empty variable (CI with a missing secret) must not shadow keystore.properties.
+fun signingValue(env: String, prop: String): String? =
+    System.getenv(env)?.takeIf { it.isNotBlank() } ?: keystoreProps.getProperty(prop)
 val releaseStoreFile: String? = signingValue("ANDROID_KEYSTORE_FILE", "storeFile")
 
 // A versioned build is a real release: never let it fall back to the debug key silently.

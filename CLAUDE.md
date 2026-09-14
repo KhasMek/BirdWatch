@@ -79,59 +79,78 @@ Namespace, `applicationId` and Kotlin package are all `com.khasmek.birdwatch`.
 ```
 app/src/main/java/com/khasmek/birdwatch/
 ├── BirdWatchApp.kt                 # Application + AppContainer (manual DI, appScope)
-├── MainActivity.kt                # Single activity; PermissionGate -> AppNavigation
+├── MainActivity.kt                # Single activity (singleTask); PermissionGate -> AppNavigation
 ├── detection/
-│   ├── DetectionSignatures.kt     # All OUIs, names, mfr IDs, Raven UUIDs (pure Kotlin)
-│   ├── DeviceClassifier.kt        # BLE heuristics 1-5, DetectionMethod/DeviceType enums (pure)
-│   ├── DetectedDevice.kt          # Room entity shared by both sources; DetectionSource enum
-│   ├── BleScanner.kt              # BluetoothLeScanner wrapper, MAC dedupe, StateFlows
-│   └── ScanForegroundService.kt   # Phase 6: owns BLE scanner + USB reader in background
-├── usb/                           # Phase 4
-│   ├── UsbCompanion.kt            # Device attach/permission, serial open, line reader
+│   ├── DetectionSignatures.kt     # Core OUIs, names, mfr IDs, Raven UUIDs (pure Kotlin)
+│   ├── SignaturePacks.kt          # Opt-in packs (typed signatures) + Sources credits (pure)
+│   ├── DeviceClassifier.kt        # BLE heuristics 1-5, pack matching, WiFi AP + Remote ID (pure)
+│   ├── RemoteId.kt                # ASTM F3411 / Open Drone ID decoder (pure)
+│   ├── DetectedDevice.kt          # Room entity shared by every source; DetectionSource enum
+│   ├── DetectionTable.kt          # Thread-safe per-source in-memory table keyed by MAC (pure)
+│   ├── SourceMerge.kt             # Folds the per-source tables into one row per MAC (pure)
+│   ├── ScanIssue.kt               # Why a radio is not delivering (BT off, location off, ...)
+│   ├── BleScanner.kt              # BluetoothLeScanner wrapper, restart budget, StateFlows
+│   ├── ScanRestartBudget.kt       # Rations stop+start so Android never refuses a scan (pure)
+│   └── ScanForegroundService.kt   # Foreground service: keeps the session alive, notification
+├── usb/
+│   ├── UsbCompanion.kt            # ESP32 attach/permission, CDC serial, line reader, dumps
 │   └── FirmwareLineParser.kt      # JSON line -> DetectedDevice (pure, testable)
-├── location/
-│   └── LocationProvider.kt        # FusedLocation wrapper; GeoFix; currentFix() for tagging
+├── wifi/WifiApScanner.kt          # Phone WiFi AP scan (third source; opt-in)
+├── location/LocationProvider.kt   # FusedLocation wrapper; GeoFix; currentFix() for tagging
 ├── data/
-│   ├── DetectionDatabase.kt       # Room DB (v1), schema exported to app/schemas/
-│   ├── DetectionDao.kt            # upsert, by-session, all, count, delete
-│   ├── SessionDao.kt              # sessions + SessionSummary (device/flock/raven counts)
-│   ├── ScanSession.kt             # Session entity + SessionSummary
-│   ├── SessionManager.kt          # UUID per session, starts/stops radios, persists detections
-│   └── ExportManager.kt           # Phase 8
-├── audio/AlertSounds.kt           # Phase 5
+│   ├── DetectionDatabase.kt       # Room DB (v3, auto-migrations), schemas in app/schemas/
+│   ├── DetectionDao.kt / SessionDao.kt / ScanSession.kt
+│   ├── SessionManager.kt          # Session lifecycle; merges sources; persists detections
+│   ├── ExportWriter.kt / ExportReader.kt   # JSON/CSV/KML out, JSON/CSV back in (pure)
+│   ├── ExportManager.kt           # Writes to cache/exports and builds the share intent
+│   ├── Backup.kt / BackupManager.kt        # Multi-session backup, merge-on-restore, delete-all
+│   ├── AppSettings.kt             # Plain prefs: audio, scan mode, packs, WiFi scan
+│   └── SecureSettings.kt          # EncryptedSharedPreferences: Maps API key
+├── audio/AlertSounds.kt           # Synthesised chirps via SoundPool
 ├── ui/
 │   ├── PermissionGate.kt          # Runtime permission flow (BLE + location, notifications optional)
+│   ├── AppViewModel.kt            # appViewModel {} factory helpers (with/without SavedStateHandle)
 │   ├── navigation/AppNavigation.kt
-│   ├── theme/
-│   ├── screens/                   # Dashboard, Map, PreviousSession, Settings
-│   └── components/                # DeviceCard, StatsBar (Phase 5)
-└── util/Permissions.kt
+│   ├── theme/                     # Theme, DetectionColors (fill + dark-safe text variants)
+│   ├── screens/                   # Dashboard, Map, PreviousSession(+Detail), Settings, About
+│   └── components/                # DeviceCard, StatsBar, dialogs
+└── util/                          # Permissions, TimeFormat, MapsKeyInjector
 ```
 
 ## Data model
+
+Room schema **v3** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
+`scan_sessions.label`; both are auto-migrations, exported schemas live in `app/schemas/`).
 
 ```kotlin
 @Entity(tableName = "detected_devices", primaryKeys = ["sessionId", "macAddress"])
 data class DetectedDevice(
     val sessionId: String,
     val macAddress: String,
-    val source: DetectionSource,        // BLE | ESP32_WIFI
+    val source: DetectionSource,        // BLE | ESP32_WIFI | PHONE_WIFI
     val deviceName: String?,
     val detectionMethod: DetectionMethod, // wireName == firmware detection_method string
-    val deviceType: DeviceType,         // FLOCK | SOUNDTHINKING | RAVEN
+    val deviceType: DeviceType,         // FLOCK | SOUNDTHINKING | RAVEN | AXON | ... (has a category)
     val confidence: Confidence,         // HIGH | LOW
     val matchedOn: String,              // the OUI / name pattern / mfr id / UUID that fired
     val ravenFirmware: String?,         // "1.1.x" | "1.2.x" | "1.3.x" | "?"   (BLE Raven only)
     val tier: Int?,                     // 0..4 firmware confidence tier      (ESP32 only)
-    val channel: Int?,                  // WiFi channel                       (ESP32 only)
+    val channel: Int?,                  // WiFi channel                       (ESP32 / phone WiFi)
     val rssi: Int,
     val latitude: Double?, val longitude: Double?, val accuracyMeters: Float?,
     val firstSeen: Long, val lastSeen: Long,   // epoch millis
     val sightings: Int,
+    // v2: Remote ID (drones pack) -- the aircraft's own reported position and its operator
+    val uasId: String?, val operatorId: String?,
+    val targetLatitude: Double?, val targetLongitude: Double?, val targetAltitudeM: Double?,
+    val operatorLatitude: Double?, val operatorLongitude: Double?,
 )
 
 @Entity(tableName = "scan_sessions")
-data class ScanSession(@PrimaryKey val id: String, val startedAt: Long, val endedAt: Long?)
+data class ScanSession(
+    @PrimaryKey val id: String, val startedAt: Long, val endedAt: Long?,
+    val label: String?,                 // v3: "ESP32 import (flash)", "Imported (JSON)", ...
+)
 ```
 
 Dedupe is per (session, MAC). A re-sighting updates rssi, lastSeen, sightings, GPS, and keeps a
@@ -227,7 +246,9 @@ Unit tests: `app/src/test/.../DeviceClassifierTest.kt`. Keep the classifier free
 ### Permissions
 Declared in the manifest and requested on launch by `PermissionGate`:
 `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (API 31+), `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`,
-`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_CONNECTED_DEVICE`, `POST_NOTIFICATIONS` (optional).
+`POST_NOTIFICATIONS` (optional). Install-time only: `FOREGROUND_SERVICE`,
+`FOREGROUND_SERVICE_CONNECTED_DEVICE`, `FOREGROUND_SERVICE_LOCATION` (the service type is
+`connectedDevice|location`), `ACCESS_WIFI_STATE` + `CHANGE_WIFI_STATE` (phone WiFi AP scan).
 Legacy `BLUETOOTH`/`BLUETOOTH_ADMIN` are declared with `maxSdkVersion=30`. Android also needs
 **location services switched on** to deliver BLE scan results; `BleScanner` surfaces a warning.
 USB access uses the USB host permission dialog, not a manifest permission.
@@ -317,8 +338,12 @@ commit points and messages but never run git.
 ./gradlew assembleDebug          # compile ("dev-debug" version)
 ./gradlew testDebugUnitTest      # JVM tests (classifier, parsers, exporters, Remote ID)
 ./gradlew installDebug           # dev device: Pixel 5 (redfin), Android 14, rooted
-./gradlew assembleRelease -PbirdwatchVersion=2026.09.1   # minified; debug-signed unless keystore.properties exists
+./gradlew lintDebug              # CI runs this too; run it before suggesting a commit
+./gradlew assembleRelease        # minified "dev" build, debug-signed (for testing R8 on a device only)
+./gradlew assembleRelease -PbirdwatchVersion=2026.09.1   # a real release: REQUIRES keystore.properties or the ANDROID_KEYSTORE_* env vars, else the build refuses to configure
 ```
+The version check runs at configuration time for every task, so never leave `BIRDWATCH_VERSION`
+exported in a dev shell.
 
 **Versioning** is rolling date-based: `YYYY.MM.N` (N = release number within the month, 1-99).
 `versionName` = that string; `versionCode` = `YYYYMM * 100 + N` (2026.09.1 -> 20260901), computed
@@ -331,9 +356,11 @@ uninstall.)
 **Release**: run `.github/workflows/release.yml` by hand from the Actions tab with the version
 as input (it creates the tag on the current commit), or push a tag `YYYY.MM.N`. Either way it
 validates the format, runs unit tests, builds a signed minified APK, and publishes a GitHub Release with
-`BirdWatch-<tag>.apk`, a sha256, and the R8 `mapping.txt`. It refuses to run without the
-`KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` secrets. CI
-(`ci.yml`) runs build + tests + lint on pushes to `main` and PRs. Release is minified with R8
+`BirdWatch-<tag>.apk`, a sha256, and the R8 `mapping.txt`. It refuses to run if any of the
+`KEYSTORE_BASE64` / `KEYSTORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` secrets is empty, and
+refuses to reuse a version: if the tag already exists on another commit or a Release for it
+exists, bump N instead (a `concurrency` group keyed on the tag stops two dispatches racing). CI
+(`ci.yml`, read-only token) runs build + tests + lint on pushes to `main` and PRs. Release is minified with R8
 (`isMinifyEnabled` + `isShrinkResources`); app-specific rules live in `app/proguard-rules.pro`,
 everything else comes from library consumer rules. Debug and release share the `applicationId`
 on purpose; debug only adds `-debug` to the version name.

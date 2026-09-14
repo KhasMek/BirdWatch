@@ -8,6 +8,10 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only token: this job only builds and uploads artifacts.
+permissions:
+  contents: read
+
 # Cancel superseded runs for the same ref (e.g. a new push to a PR) to save CI minutes.
 concurrency:
   group: ci-${{ github.ref }}

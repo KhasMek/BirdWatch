@@ -210,9 +210,9 @@ the current session and all sessions with the chips above the map.
 one for its detections, share it as JSON, CSV or KML through the Android share sheet, or delete
 it. The export icon on the dashboard shares the session that's running right now.
 
-**Restoring an export.** The file icon on the Sessions tab imports a JSON or CSV file that
-BirdWatch exported earlier, on this phone or another one, as a session with its original
-timestamps and GPS. KML can't be imported (it only carries located devices). A session that's
+**Restoring an export.** *Import session…* in the Sessions menu (the ⋮ button) imports a JSON or
+CSV file that BirdWatch exported earlier, on this phone or another one, as a session with its
+original timestamps and GPS. KML can't be imported (it only carries located devices). A session that's
 already present is refused, so the same file can't be imported twice.
 
 **Backup and restore.** The Sessions menu has *Back up…* and *Restore…*. Back up writes every
@@ -221,13 +221,15 @@ which categories to include, for example Flock cameras and body cams but not gun
 JSON is the full format; CSV is also restorable but drops session names and exact start/end
 times; KML is for Google Earth only. Restore reads a JSON or CSV backup, shows what's in it, lets
 you leave categories out, and *merges*: sessions you already have keep everything and gain any
-missing detections, sessions you don't have are added. *Delete all data…* wipes every session and
-detection after confirmation; settings and your Maps key stay.
+missing detections, sessions you don't have are added. A detection present in both keeps its most
+recent record and higher sighting count, so restoring an old backup never rolls anything back.
+*Delete all data…* wipes every session and detection after confirmation; settings and your Maps
+key stay.
 
 **Importing from the ESP32.** The board keeps its own detection table when it runs on its own
-(powered from a battery pack, say). Plug it in, open the Sessions tab and tap the download icon to
-pull either the current run (from memory) or the previous run (saved to flash at power-off) into a
-new session. Imported detections have no GPS and are timestamped at import time, because the
+(powered from a battery pack, say). Plug it in, open the Sessions menu and choose *Import from
+ESP32…* to pull either the current run (from memory) or the previous run (saved to flash at
+power-off) into a new session. Imported detections have no GPS and are timestamped at import time, because the
 board has no clock; their tier, channel, signal and sighting counts are preserved.
 
 **Audio.** A two-note chirp for a high-confidence detection, a single blip for a low-confidence

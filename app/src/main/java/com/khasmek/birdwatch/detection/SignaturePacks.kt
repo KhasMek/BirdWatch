@@ -41,7 +41,7 @@ object Sources {
             "Cross-reference for the Meta glasses discrimination logic",
             "https://github.com/lnxgod/friendorfoe"),
         Source("S10", "ASTM F3411 / Open Drone ID",
-            "Remote ID BLE advertisement format (planned)",
+            "Remote ID message formats for BLE advertisements and WiFi beacon vendor elements",
             "https://github.com/opendroneid/opendroneid-core-c"),
         Source("S11", "DeFlock (FoggedLens)",
             "ALPR make/model catalogue; confirms no RF signatures exist for fixed ALPR competitors",

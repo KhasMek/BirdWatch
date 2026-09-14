@@ -2,7 +2,7 @@
 
 This file is the single source of truth for **which radio signatures the app matches, how
 confident each one is, and where it came from**. Every entry in
-`app/src/main/java/com/khasmek/flockyou/detection/` must trace back to a row here, and the
+`app/src/main/java/com/khasmek/birdwatch/detection/` must trace back to a row here, and the
 README credits section is generated from the "Sources" table at the bottom. Add a source here
 before adding a signature in code.
 
@@ -64,7 +64,7 @@ with unrelated hardware, or an echo-type match.
 
 No other public signature exists for older ShotSpotter sensors (wired/LTE). Nothing to add.
 
-### 2.3 Law-enforcement equipment (planned)
+### 2.3 Law-enforcement equipment (shipped, beta)
 
 | Vendor | Signature | Type | Radio | Confidence | Source |
 |---|---|---|---|---|---|
@@ -81,7 +81,7 @@ Excluded from this pack (see §4): Getac, Panasonic i-PRO, Axis-registered "Floc
 infrastructure. It is opt-in and its hits are counted under their own category, never as
 Flock or Raven.
 
-### 2.4 Wearable cameras (planned)
+### 2.4 Wearable cameras (shipped, beta)
 
 | Vendor | Signature | Type | Radio | Confidence | Source |
 |---|---|---|---|---|---|
@@ -92,7 +92,7 @@ No OUI: the glasses use resolvable private (rotating) addresses, so MAC matching
 Company ID alone or service UUID alone are false-positive magnets (S6 removed them); only the
 composite or the name counts.
 
-### 2.5 Drones (planned)
+### 2.5 Drones (shipped, beta)
 
 | Vendor | Signature | Type | Radio | Confidence | Source |
 |---|---|---|---|---|---|
@@ -147,11 +147,12 @@ belong to devices that run their own access point.
 4. Note the rooted-device option `settings put global wifi_scan_throttle_enabled 0` in docs
    for faster scanning during wardriving.
 
-### Phase 9c (stretch): BLE Remote ID decoding for drones
+### Phase 9c (shipped): Remote ID decoding for drones
 
-Parse ASTM F3411 Open Drone ID BLE advertisements (Basic ID, Location, Operator ID) on the
-phone. Standardised, highly reliable, and yields drone position rather than just presence.
-Larger than the other items because of the message parsing; do last.
+`detection/RemoteId.kt` parses ASTM F3411 Open Drone ID messages (Basic ID, Location, System,
+Operator ID, Self ID, Message Pack) from BLE service data under UUID 0xFFFA and from WiFi
+beacon vendor elements carrying the ASD-STAN OUI. Standardised, highly reliable, and yields the
+drone's own position (and its operator's) rather than just presence. Gated by the Drones pack.
 
 ---
 
@@ -181,11 +182,10 @@ Larger than the other items because of the message parsing; do last.
 | S7 | Bluetooth SIG Assigned Numbers | Company IDs `0x034D`, `0x0D53`, `0x09C8`; 16-bit service UUIDs `0xFC81`, `0xFD5F` | https://www.bluetooth.com/specifications/assigned-numbers/ |
 | S8 | @NitekryDPaul, nite-oui-collection `groups/le/privacy_invaders_ouis_law_enforcement.csv` | Axon, WatchGuard, Digital Ally, Utility Inc. OUIs (and the excluded Getac / Panasonic / Axis rows) | https://github.com/nitekry/nite-oui-collection/blob/main/groups/le/privacy_invaders_ouis_law_enforcement.csv |
 | S9 | lnxgod / friendorfoe, `esp32/scanner/main/detection/ble_fingerprint.c` | Cross-reference for the Meta composite discrimination logic (cited by S6) | https://github.com/lnxgod/friendorfoe |
-| S10 | ASTM F3411 / Open Drone ID | Remote ID BLE advertisement format (phase 9c) | https://github.com/opendroneid/opendroneid-core-c |
+| S10 | ASTM F3411 / Open Drone ID | Remote ID message formats for BLE advertisements and WiFi beacon vendor elements | https://github.com/opendroneid/opendroneid-core-c |
 | S11 | DeFlock (FoggedLens) | ALPR make/model catalogue; confirms no RF signatures for fixed ALPR competitors | https://github.com/FoggedLens/deflock |
 | S12 | IEEE OUI registry | Vendor attribution for every MAC prefix above | https://standards-oui.ieee.org/ |
+| S13 | Lucia Pintor & Luigi Atzori (2022), "Analysis of Wi-Fi Probe Requests Towards Information Element Fingerprinting", IEEE GLOBECOM | The IE-fingerprint method used by the ESP32 firmware (research credit as written upstream) | https://doi.org/10.1109/GLOBECOM48099.2022.10001618 |
 
-Research credits as written upstream: Lucia Pintor & Luigi Atzori (2022), "Analysis of Wi-Fi
-Probe Requests Towards Information Element Fingerprinting", IEEE GLOBECOM,
-doi:10.1109/GLOBECOM48099.2022.10001618, for the IE-fingerprint method used by the ESP32
-firmware.
+`Sources.ALL` in `SignaturePacks.kt` mirrors this table row for row and feeds the in-app
+"About & credits" screen; keep the two in step.
