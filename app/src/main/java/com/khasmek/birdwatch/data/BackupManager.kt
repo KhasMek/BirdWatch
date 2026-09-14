@@ -90,13 +90,14 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
         return RestoreResult(sessionsAdded, sessionsMerged, devicesAdded, devicesUpdated)
     }
 
-    /** Wipe every session and detection. The caller stops a running session first. */
+    /** Wipe every session, detection and per-device edit. The caller stops a running session first. */
     suspend fun deleteAll() {
         db.withTransaction {
             db.detectionDao().deleteAll()
             db.sessionDao().deleteAll()
+            db.deviceOverrideDao().deleteAll()
         }
-        Log.i(TAG, "All sessions and detections deleted")
+        Log.i(TAG, "All sessions, detections and device edits deleted")
     }
 
     companion object {

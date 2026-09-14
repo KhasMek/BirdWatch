@@ -63,6 +63,8 @@ fun DeviceCard(
     now: Long,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
+    /** User-chosen name (device_overrides); shown as the title with the detected name beneath. */
+    alias: String? = null,
 ) {
     var expanded by rememberSaveable(device.macAddress) { mutableStateOf(initiallyExpanded) }
     val typeColor = DetectionColors.forType(device.deviceType)
@@ -79,17 +81,21 @@ fun DeviceCard(
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = device.displayName,
+                        text = alias?.takeIf { it.isNotBlank() } ?: device.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = device.macAddress,
+                        // With an alias the detected name is still evidence; keep it in view.
+                        text = if (alias.isNullOrBlank() || device.displayName == "Unknown") device.macAddress
+                        else "${device.displayName} · ${device.macAddress}",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Spacer(Modifier.width(8.dp))

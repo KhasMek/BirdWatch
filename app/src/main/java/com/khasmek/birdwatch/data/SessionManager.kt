@@ -246,6 +246,27 @@ class SessionManager(
         return parsed.copy(session = session)
     }
 
+    /**
+     * Delete one device's detections from [sessionIds]. If the running session is among them the
+     * in-memory tables forget the MAC too, so the 2 s flush does not put the row straight back;
+     * it also leaves [seenMacs] so a later sighting alerts again as a new detection.
+     */
+    suspend fun deleteDetections(macAddress: String, sessionIds: Collection<String>): Int = mutex.withLock {
+        val mac = DetectionTable.normalizeMac(macAddress)
+        val ids = sessionIds.toList()
+        if (ids.isEmpty()) return@withLock 0
+        val current = _currentSession.value?.id
+        if (current != null && current in ids) {
+            bleScanner.table.remove(mac)
+            usbCompanion.table.remove(mac)
+            wifiApScanner.table.remove(mac)
+            synchronized(seenMacs) { seenMacs.remove(mac) }
+        }
+        val removed = detectionDao.deleteDevice(mac, ids)
+        Log.i(TAG, "Deleted $removed detection(s) of $mac from ${ids.size} session(s)")
+        removed
+    }
+
     suspend fun deleteSession(sessionId: String) {
         if (_currentSession.value?.id == sessionId) stopSuspending()
         db.withTransaction {

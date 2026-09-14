@@ -85,6 +85,14 @@ data class DetectedDevice(
     val isRemoteId: Boolean
         get() = detectionMethod == DetectionMethod.REMOTE_ID_BLE || detectionMethod == DetectionMethod.REMOTE_ID_WIFI
 
+    /**
+     * Whether the MAC names one physical thing over time. Fixed cameras, Ravens and vehicle /
+     * body-cam radios keep their MAC; Meta glasses and Remote ID drones rotate theirs, so a
+     * per-MAC alias or corrected pin would attach to a random address.
+     */
+    val hasStableIdentity: Boolean
+        get() = deviceType.category != DeviceCategory.WEARABLE_CAMERA && !isRemoteId
+
     /** Fold a decoded Remote ID payload into this row, keeping earlier values where the new broadcast omits them. */
     fun withRemoteId(p: RemoteId.Payload?): DetectedDevice {
         if (p == null) return this

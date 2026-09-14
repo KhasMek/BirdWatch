@@ -151,7 +151,7 @@ fun SessionDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.devices, key = { it.macAddress }) { device ->
-                        DeviceCard(device = device, now = now)
+                        DeviceCard(device = device, now = now, alias = state.aliases[device.macAddress])
                     }
                 }
             }

@@ -46,6 +46,8 @@ data class DashboardUiState(
     val wifi: WifiScanStatus = WifiScanStatus(),
     /** Category filter for the list; null = everything. Counts always cover everything. */
     val filter: DeviceCategory? = null,
+    /** User aliases by MAC (device_overrides). */
+    val aliases: Map<String, String> = emptyMap(),
 ) {
     val isActive: Boolean get() = session != null
     val totalCount: Int get() = devices.size
@@ -148,6 +150,8 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
             wifi = wifiStatus,
             filter = f,
         )
+    }.combine(container.database.deviceOverrideDao().observeAll()) { s, overrides ->
+        s.copy(aliases = overrides.mapNotNull { o -> o.alias?.takeIf { it.isNotBlank() }?.let { o.macAddress to it } }.toMap())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 
     fun toggleSession() {

@@ -1,5 +1,6 @@
 package com.khasmek.birdwatch.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,19 +12,31 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EditLocationAlt
+import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,7 +67,6 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
-import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.DeviceCard
@@ -62,27 +74,25 @@ import com.khasmek.birdwatch.ui.components.categoryIcon
 import com.khasmek.birdwatch.ui.components.coords
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.Permissions
+import com.khasmek.birdwatch.util.TimeFormat
 
 /**
- * What the user tapped on the map: a device's own marker, or a Remote ID operator marker. Keyed
- * by session + MAC because "All sessions" can hold the same MAC several times, and stored as a
- * string so it survives rotation via rememberSaveable.
+ * What the user tapped on the map: a device's own marker, or a Remote ID operator marker.
+ * Stored as a string so it survives rotation via rememberSaveable.
  */
-private data class MapSelection(val sessionId: String, val macAddress: String, val isOperator: Boolean) {
-    fun matches(d: DetectedDevice) = d.sessionId == sessionId && d.macAddress == macAddress
-    fun encode() = "$sessionId|$macAddress|${if (isOperator) 1 else 0}"
+private data class MapSelection(val macAddress: String, val isOperator: Boolean) {
+    fun encode() = "$macAddress|${if (isOperator) 1 else 0}"
 
     companion object {
-        fun of(d: DetectedDevice, isOperator: Boolean) = MapSelection(d.sessionId, d.macAddress, isOperator)
         fun decode(s: String?): MapSelection? {
             val parts = s?.split('|') ?: return null
-            if (parts.size != 3) return null
-            return MapSelection(parts[0], parts[1], parts[2] == "1")
+            if (parts.size != 2) return null
+            return MapSelection(parts[0], parts[1] == "1")
         }
     }
 }
 
-private fun markerKey(d: DetectedDevice) = "${d.sessionId}|${d.macAddress}"
+private fun GeoPoint.toLatLng() = LatLng(latitude, longitude)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,9 +101,11 @@ fun MapScreen(
     viewModel: MapViewModel = appViewModel { MapViewModel(it) },
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     // Inject the key + init the SDK before the first GoogleMap composable is created.
     LaunchedEffect(state.apiKey) { if (state.hasKey) viewModel.ensureMapsInitialized() }
+    LaunchedEffect(Unit) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Map") }) }) { innerPadding ->
         Box(
@@ -108,7 +120,7 @@ fun MapScreen(
                     title = "Maps SDK failed to initialise",
                     body = "Google Play services may be missing or out of date on this device.",
                 )
-                state.mapsReady -> MapContent(state, onScopeChange = viewModel::setScope, onToggleCategory = viewModel::toggleCategory)
+                state.mapsReady -> MapContent(state, viewModel)
             }
         }
     }
@@ -116,21 +128,22 @@ fun MapScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MapContent(
-    state: MapUiState,
-    onScopeChange: (MapScope) -> Unit,
-    onToggleCategory: (DeviceCategory) -> Unit,
-) {
+private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
     val context = LocalContext.current
     val hasLocationPermission = remember { Permissions.allEssentialGranted(context) }
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(39.5, -98.35), 3.5f) // continental US until we know better
     }
-    // Both survive rotation and tab switches: the camera is saveable already, and re-framing
-    // would yank the user away from wherever they had panned.
+    // All of these survive rotation and tab switches: the camera is saveable already, and
+    // re-framing would yank the user away from wherever they had panned.
     var framed by rememberSaveable { mutableStateOf(false) }
     var selectionKey by rememberSaveable { mutableStateOf<String?>(null) }
     val selection = remember(selectionKey) { MapSelection.decode(selectionKey) }
+    /** MAC of the pin being moved with the crosshair, or null when not in move mode. */
+    var movingMac by rememberSaveable { mutableStateOf<String?>(null) }
+    var aliasMac by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteMac by rememberSaveable { mutableStateOf<String?>(null) }
+    var showHiddenList by rememberSaveable { mutableStateOf(false) }
 
     // Frame the markers the first time we have any; otherwise centre on the phone's fix.
     val mappable = state.mappable
@@ -138,15 +151,14 @@ private fun MapContent(
         if (framed) return@LaunchedEffect
         if (mappable.isNotEmpty()) {
             val b = LatLngBounds.builder()
-            mappable.forEach {
-                if (it.hasTargetLocation) b.include(LatLng(it.targetLatitude!!, it.targetLongitude!!))
-                else if (it.hasLocation) b.include(LatLng(it.latitude!!, it.longitude!!))
-                if (it.hasOperatorLocation) b.include(LatLng(it.operatorLatitude!!, it.operatorLongitude!!))
+            mappable.forEach { pin ->
+                pin.position?.let { b.include(it.toLatLng()) }
+                pin.operatorPosition?.let { b.include(it.toLatLng()) }
             }
             // Only a successful animation counts as framed; a failure (map not ready yet) leaves
             // it false so the next change of inputs tries again.
             runCatching {
-                if (mappable.size == 1 && !mappable[0].hasOperatorLocation) {
+                if (mappable.size == 1 && mappable[0].operatorPosition == null) {
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(b.build().center, 15f))
                 } else {
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(b.build(), 120))
@@ -161,58 +173,165 @@ private fun MapContent(
         }
     }
 
-    // The sheet shows the live row for the tapped marker (RSSI, sightings, drone position keep
-    // updating during a session). If the row is gone (session deleted) or its category was just
-    // hidden with the chips, the sheet closes.
-    val selectedDevice = selection?.let { sel -> mappable.firstOrNull(sel::matches) }
-    LaunchedEffect(selection, selectedDevice == null) { if (selection != null && selectedDevice == null) selectionKey = null }
+    // The sheet shows the live pin for the tapped marker (RSSI, sightings, drone position keep
+    // updating during a session). If the pin is gone (deleted, hidden, filtered), the sheet closes.
+    val selectedPin = selection?.let { state.pin(it.macAddress) }
+    LaunchedEffect(selection, selectedPin == null) { if (selection != null && selectedPin == null) selectionKey = null }
+
+    // Move mode: start by centring on the pin's current position, zoomed in enough to be precise.
+    val movingPin = movingMac?.let { mac -> state.pins.firstOrNull { it.macAddress == mac } }
+    LaunchedEffect(movingMac) {
+        val target = movingPin?.position ?: return@LaunchedEffect
+        runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(target.toLatLng(), 18f)) }
+    }
+    if (movingMac != null && movingPin == null) movingMac = null
 
     Column(Modifier.fillMaxSize()) {
-        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
-            Column {
+        MapHeader(state, viewModel, onShowHidden = { showHiddenList = true })
+
+        Box(Modifier.fillMaxSize()) {
+            GoogleMap(
+                modifier = Modifier.fillMaxSize(),
+                cameraPositionState = cameraPositionState,
+                properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = hasLocationPermission),
+            ) {
+                // Stable keys: the list is re-sorted on every re-sighting, and without keys Compose
+                // would tear down and recreate marker nodes, dropping any tap in flight.
+                mappable.forEach { pin ->
+                    key(pin.macAddress) {
+                        DeviceMarker(pin, onClick = { if (movingMac == null) selectionKey = MapSelection(pin.macAddress, isOperator = false).encode() })
+                        if (pin.operatorPosition != null) {
+                            OperatorMarker(pin, onClick = { if (movingMac == null) selectionKey = MapSelection(pin.macAddress, isOperator = true).encode() })
+                        }
+                    }
+                }
+            }
+
+            if (movingPin != null) {
+                MoveOverlay(
+                    pin = movingPin,
+                    hasFix = state.fix != null,
+                    onUseMyLocation = {
+                        state.fix?.let { f ->
+                            viewModel.setLocation(movingPin.macAddress, GeoPoint(f.latitude, f.longitude))
+                            movingMac = null
+                        }
+                    },
+                    onSave = {
+                        val t = cameraPositionState.position.target
+                        viewModel.setLocation(movingPin.macAddress, GeoPoint(t.latitude, t.longitude))
+                        movingMac = null
+                    },
+                    onCancel = { movingMac = null },
+                )
+            }
+        }
+    }
+
+    // Details live in our own bottom sheet rather than the SDK's info window, which renders a
+    // detached ComposeView into a bitmap and comes out empty on current Compose versions.
+    if (selection != null && selectedPin != null && movingMac == null) {
+        PinSheet(
+            pin = selectedPin,
+            isOperator = selection.isOperator,
+            onDismiss = { selectionKey = null },
+            onMove = { movingMac = selectedPin.macAddress; selectionKey = null },
+            onResetPin = { viewModel.clearLocation(selectedPin.macAddress) },
+            onAlias = { aliasMac = selectedPin.macAddress },
+            onHide = { viewModel.setHidden(selectedPin.macAddress, true); selectionKey = null },
+            onDelete = { deleteMac = selectedPin.macAddress },
+        )
+    }
+
+    aliasMac?.let { mac ->
+        val pin = state.pins.firstOrNull { it.macAddress == mac }
+        AliasDialog(
+            current = pin?.alias,
+            detectedName = pin?.latest?.displayName ?: mac,
+            onDismiss = { aliasMac = null },
+            onSave = { viewModel.setAlias(mac, it); aliasMac = null },
+        )
+    }
+
+    deleteMac?.let { mac ->
+        val pin = state.pins.firstOrNull { it.macAddress == mac }
+        if (pin == null) {
+            deleteMac = null
+        } else {
+            DeleteDetectionDialog(
+                pin = pin,
+                sessionActive = state.sessionActive,
+                onDismiss = { deleteMac = null },
+                onConfirm = {
+                    viewModel.deleteDetections(mac, pin.rows.map { it.sessionId }.distinct())
+                    deleteMac = null
+                    selectionKey = null
+                },
+            )
+        }
+    }
+
+    if (showHiddenList) {
+        HiddenDevicesDialog(
+            pins = state.hiddenByUser,
+            onShow = { viewModel.setHidden(it, false) },
+            onDismiss = { showHiddenList = false },
+        )
+    }
+}
+
+@Composable
+private fun MapHeader(state: MapUiState, viewModel: MapViewModel, onShowHidden: () -> Unit) {
+    val mappable = state.mappable
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MapScope.entries.forEach { scope ->
+                    FilterChip(
+                        selected = state.scope == scope,
+                        onClick = { viewModel.setScope(scope) },
+                        label = { Text(scope.label) },
+                        enabled = scope != MapScope.CURRENT_SESSION || state.sessionActive,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = buildString {
+                        append("${mappable.size} on map")
+                        if (state.hiddenCount > 0) append(" · ${state.hiddenCount} hidden")
+                        if (state.unmappedCount > 0) append(" · ${state.unmappedCount} no GPS")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                )
+            }
+            // Category toggles, one per category that has something to draw. Multi-select:
+            // a highlighted chip is shown on the map, a plain one is hidden.
+            val categories = state.presentCategories
+            val hiddenByUser = state.hiddenByUser.size
+            if (categories.size > 1 || hiddenByUser > 0) {
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    MapScope.entries.forEach { scope ->
-                        FilterChip(
-                            selected = state.scope == scope,
-                            onClick = { onScopeChange(scope) },
-                            label = { Text(scope.label) },
-                            enabled = scope != MapScope.CURRENT_SESSION || state.sessionActive,
-                        )
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = buildString {
-                            append("${mappable.size} on map")
-                            if (state.hiddenCount > 0) append(" · ${state.hiddenCount} hidden")
-                            if (state.unmappedCount > 0) append(" · ${state.unmappedCount} no GPS")
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.End,
-                    )
-                }
-                // Category toggles, one per category that has something to draw. Multi-select:
-                // a highlighted chip is shown on the map, a plain one is hidden.
-                val categories = state.presentCategories
-                if (categories.size > 1) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+                    if (categories.size > 1) {
                         categories.forEach { c ->
                             val shown = c !in state.hidden
                             FilterChip(
                                 selected = shown,
-                                onClick = { onToggleCategory(c) },
+                                onClick = { viewModel.toggleCategory(c) },
                                 label = { Text("${c.shortLabel} ${state.locatedCount(c)}") },
                                 leadingIcon = {
                                     Icon(
@@ -225,94 +344,280 @@ private fun MapContent(
                             )
                         }
                     }
-                }
-            }
-        }
-        if (state.staleKey) {
-            Text(
-                "Map is still using the previously saved key. Restart the app to switch to the new one.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.tertiary,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-        }
-
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
-            uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = hasLocationPermission),
-        ) {
-            // Stable keys: the list is re-sorted on every re-sighting, and without keys Compose would
-            // tear down and recreate marker nodes, dropping any tap in flight. Session + MAC, since
-            // "All sessions" can contain the same MAC from several sessions.
-            mappable.forEach { device ->
-                key(markerKey(device)) {
-                    DeviceMarker(device, onClick = { selectionKey = MapSelection.of(device, isOperator = false).encode() })
-                    if (device.hasOperatorLocation) {
-                        OperatorMarker(device, onClick = { selectionKey = MapSelection.of(device, isOperator = true).encode() })
+                    if (hiddenByUser > 0) {
+                        TextButton(onClick = onShowHidden) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.height(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("$hiddenByUser hidden by you")
+                        }
                     }
                 }
             }
         }
     }
+    if (state.staleKey) {
+        Text(
+            "Map is still using the previously saved key. Restart the app to switch to the new one.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
 
-    // Details live in our own bottom sheet rather than the SDK's info window, which renders a
-    // detached ComposeView into a bitmap and comes out empty on current Compose versions.
-    if (selection != null && selectedDevice != null) {
-        val device = selectedDevice
-        ModalBottomSheet(onDismissRequest = { selectionKey = null }) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .navigationBarsPadding()
-            ) {
-                if (selection.isOperator && device.hasOperatorLocation) {
-                    Text("Remote ID operator", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Position reported by the drone's own broadcast (System message), which may be the takeoff point rather than the pilot's live position.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    device.operatorId?.let {
-                        Text("Operator ID $it", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+/**
+ * Move mode: a fixed crosshair over the map centre; the user pans the map underneath it. More
+ * precise than dragging the marker, where a finger hides the pin and fights the pan gesture.
+ */
+@Composable
+private fun MoveOverlay(
+    pin: MapPin,
+    hasFix: Boolean,
+    onUseMyLocation: () -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
+        Icon(
+            Icons.Default.GpsFixed,
+            contentDescription = "Crosshair",
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(36.dp),
+        )
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text("Move pin: ${pin.alias ?: pin.latest.displayName}", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Pan the map until the crosshair sits on the device, then save. Every session that saw this device will use the new spot.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = onUseMyLocation, enabled = hasFix) {
+                        Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("My location")
                     }
-                    Text(
-                        coords(device.operatorLatitude!!, device.operatorLongitude!!),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("Aircraft", style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.height(4.dp))
-                } else {
-                    Text(
-                        if (device.hasTargetLocation) "Marker is the drone's self-reported position"
-                        else "Marker is where the phone was when this was detected",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onCancel) { Text("Cancel") }
+                    Button(onClick = onSave) { Text("Save") }
                 }
-                DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true)
-                Spacer(Modifier.height(24.dp))
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DeviceMarker(device: DetectedDevice, onClick: () -> Unit) {
-    // A Remote ID drone tells us where IT is; everything else is placed where the phone was.
-    // (A drone that reported only an operator position gets just the operator marker.)
-    val position = when {
-        device.hasTargetLocation -> LatLng(device.targetLatitude!!, device.targetLongitude!!)
-        device.hasLocation -> LatLng(device.latitude!!, device.longitude!!)
-        else -> return
+private fun PinSheet(
+    pin: MapPin,
+    isOperator: Boolean,
+    onDismiss: () -> Unit,
+    onMove: () -> Unit,
+    onResetPin: () -> Unit,
+    onAlias: () -> Unit,
+    onHide: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val device = pin.latest
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .navigationBarsPadding()
+        ) {
+            if (isOperator && pin.operatorPosition != null) {
+                Text("Remote ID operator", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Position reported by the drone's own broadcast (System message), which may be the takeoff point rather than the pilot's live position.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                device.operatorId?.let {
+                    Text("Operator ID $it", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
+                }
+                Text(
+                    coords(pin.operatorPosition.latitude, pin.operatorPosition.longitude),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text("Aircraft", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
+            } else {
+                Text(
+                    when {
+                        pin.isMoved -> "Pin placed by you" + pin.override?.updatedAt?.takeIf { it > 0 }?.let { " on ${TimeFormat.dateTime(it)}" }.orEmpty()
+                        device.hasTargetLocation -> "Marker is the drone's self-reported position"
+                        else -> "Marker is where the phone was when this was detected"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (pin.sessionCount > 1) {
+                    Text(
+                        "Seen in ${pin.sessionCount} sessions, ${pin.totalSightings} sightings, " +
+                            "${TimeFormat.dateTime(pin.firstSeen)} to ${TimeFormat.dateTime(pin.lastSeen)}. Showing the latest.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true, alias = pin.alias)
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (pin.canEdit) {
+                    OutlinedButton(onClick = onMove) {
+                        Icon(Icons.Default.EditLocationAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Move pin")
+                    }
+                    if (pin.isMoved) {
+                        OutlinedButton(onClick = onResetPin) { Text("Reset pin") }
+                    }
+                    OutlinedButton(onClick = onAlias) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (pin.alias == null) "Set alias" else "Edit alias")
+                    }
+                }
+                OutlinedButton(onClick = onHide) {
+                    Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Hide")
+                }
+                OutlinedButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            if (!pin.canEdit) {
+                Text(
+                    "This kind of device rotates its address, so a pin or alias cannot be attached to it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
     }
-    val markerState = remember(device.macAddress, position) { MarkerState(position) }
-    val hue = when (device.deviceType.category) {
+}
+
+@Composable
+private fun AliasDialog(current: String?, detectedName: String, onDismiss: () -> Unit, onSave: (String?) -> Unit) {
+    var text by rememberSaveable { mutableStateOf(current.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Alias") },
+        text = {
+            Column {
+                Text(
+                    "A name of your own for this device. The detected name ($detectedName) stays visible underneath.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    label = { Text("Alias") },
+                    placeholder = { Text("e.g. Camera at Main & 3rd") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                if (!current.isNullOrBlank()) TextButton(onClick = { onSave(null) }) { Text("Clear") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DeleteDetectionDialog(pin: MapPin, sessionActive: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val n = pin.rows.size
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete detection?") },
+        text = {
+            Text(
+                buildString {
+                    append("This removes ${pin.alias ?: pin.latest.displayName} (${pin.macAddress}) from ")
+                    append(if (n == 1) "this session." else "all ${pin.sessionCount} sessions shown ($n detections).")
+                    if (sessionActive) append(" If it is still in range it will be picked up again as a new detection.")
+                    append(" To keep the data but drop the pin, use Hide instead. This cannot be undone.")
+                }
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun HiddenDevicesDialog(pins: List<MapPin>, onShow: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Hidden devices") },
+        text = {
+            Column {
+                if (pins.isEmpty()) Text("Nothing is hidden.", style = MaterialTheme.typography.bodyMedium)
+                pins.forEach { pin ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(categoryIcon(pin.category), contentDescription = null, tint = DetectionColors.textForCategory(pin.category), modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(pin.alias ?: pin.latest.displayName, style = MaterialTheme.typography.bodyMedium)
+                            Text(pin.macAddress, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        TextButton(onClick = { onShow(pin.macAddress) }) {
+                            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Show")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+}
+
+@Composable
+private fun DeviceMarker(pin: MapPin, onClick: () -> Unit) {
+    val position = pin.position?.toLatLng() ?: return // operator-only drone: just the operator marker
+    val markerState = remember(pin.macAddress, position) { MarkerState(position) }
+    val hue = when (pin.category) {
         DeviceCategory.FLOCK_ALPR -> BitmapDescriptorFactory.HUE_ORANGE
         DeviceCategory.GUNSHOT_DETECTOR -> BitmapDescriptorFactory.HUE_VIOLET
         DeviceCategory.LAW_ENFORCEMENT -> BitmapDescriptorFactory.HUE_AZURE
@@ -323,7 +628,7 @@ private fun DeviceMarker(device: DetectedDevice, onClick: () -> Unit) {
 
     Marker(
         state = markerState,
-        title = "${device.deviceType.label} · ${device.displayName}",
+        title = "${pin.latest.deviceType.label} · ${pin.alias ?: pin.latest.displayName}",
         icon = icon,
         onClick = { onClick(); true }, // true = consume the tap; no SDK info window
     )
@@ -334,15 +639,15 @@ private fun DeviceMarker(device: DetectedDevice, onClick: () -> Unit) {
  * line back to the aircraft so it is obvious which operator belongs to which drone.
  */
 @Composable
-private fun OperatorMarker(device: DetectedDevice, onClick: () -> Unit) {
-    val operator = LatLng(device.operatorLatitude!!, device.operatorLongitude!!)
-    val markerState = remember(device.macAddress, operator) { MarkerState(operator) }
+private fun OperatorMarker(pin: MapPin, onClick: () -> Unit) {
+    val operator = pin.operatorPosition?.toLatLng() ?: return
+    val markerState = remember(pin.macAddress, operator) { MarkerState(operator) }
     val icon = remember { BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_ROSE) }
-    val label = device.uasId ?: device.displayName
+    val label = pin.latest.uasId ?: pin.latest.displayName
 
-    if (device.hasTargetLocation) {
+    pin.position?.let { aircraft ->
         Polyline(
-            points = listOf(LatLng(device.targetLatitude!!, device.targetLongitude!!), operator),
+            points = listOf(aircraft.toLatLng(), operator),
             color = DetectionColors.Drone,
             width = 5f,
             pattern = listOf(Dash(24f), Gap(12f)),

@@ -1,22 +1,63 @@
 package com.khasmek.birdwatch.ui.screens
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
+import com.khasmek.birdwatch.data.DeviceOverride
 import com.khasmek.birdwatch.detection.DetectedDevice
+import com.khasmek.birdwatch.detection.DetectionTable
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.location.GeoFix
 import com.khasmek.birdwatch.util.MapsKeyInjector
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 enum class MapScope(val label: String) { CURRENT_SESSION("This session"), ALL_SESSIONS("All sessions") }
+
+/** A coordinate without Google Maps types, so the ViewModel stays framework-free. */
+data class GeoPoint(val latitude: Double, val longitude: Double)
+
+/**
+ * One pin: every row for a MAC in the current scope (newest first) plus what the user has said
+ * about that device. "All sessions" used to draw one pin per session row, so a camera driven
+ * past three times showed three pins; now it is one pin at the corrected position if there is
+ * one, otherwise where it was last seen.
+ */
+data class MapPin(val macAddress: String, val rows: List<DetectedDevice>, val override: DeviceOverride?) {
+    val latest: DetectedDevice get() = rows.first()
+    val category: DeviceCategory get() = latest.deviceType.category
+    val alias: String? get() = override?.alias?.takeIf { it.isNotBlank() }
+    val isHiddenByUser: Boolean get() = override?.hidden == true
+    val isMoved: Boolean get() = override?.hasLocation == true
+    val canEdit: Boolean get() = latest.hasStableIdentity
+
+    /** Where the device's own marker goes: user correction, else the drone's reported spot, else where the phone was. */
+    val position: GeoPoint? = when {
+        override?.hasLocation == true -> GeoPoint(override.latitude!!, override.longitude!!)
+        latest.hasTargetLocation -> GeoPoint(latest.targetLatitude!!, latest.targetLongitude!!)
+        else -> rows.firstOrNull { it.hasLocation }?.let { GeoPoint(it.latitude!!, it.longitude!!) }
+    }
+
+    /** Remote ID operator / takeoff position from the newest row that has one. */
+    val operatorPosition: GeoPoint? =
+        rows.firstOrNull { it.hasOperatorLocation }?.let { GeoPoint(it.operatorLatitude!!, it.operatorLongitude!!) }
+
+    val isLocated: Boolean get() = position != null || operatorPosition != null
+    val sessionCount: Int get() = rows.map { it.sessionId }.distinct().size
+    val totalSightings: Int get() = rows.sumOf { it.sightings }
+    val firstSeen: Long get() = rows.minOf { it.firstSeen }
+    val lastSeen: Long get() = rows.maxOf { it.lastSeen }
+}
 
 data class MapUiState(
     val loaded: Boolean = false,
@@ -27,6 +68,7 @@ data class MapUiState(
     val staleKey: Boolean = false,
     val scope: MapScope = MapScope.ALL_SESSIONS,
     val devices: List<DetectedDevice> = emptyList(),
+    val overrides: Map<String, DeviceOverride> = emptyMap(),
     /** Categories the user has switched off with the chips above the map. */
     val hidden: Set<DeviceCategory> = emptySet(),
     val sessionActive: Boolean = false,
@@ -34,31 +76,45 @@ data class MapUiState(
 ) {
     val hasKey: Boolean get() = !apiKey.isNullOrBlank()
 
-    /** Devices that have somewhere to be drawn, before the category filter. */
-    val located: List<DetectedDevice> = devices.filter { it.hasLocation || it.hasTargetLocation || it.hasOperatorLocation }
+    /** One pin per MAC in scope, newest row first within each. */
+    val pins: List<MapPin> = devices
+        .groupBy { DetectionTable.normalizeMac(it.macAddress) }
+        .map { (mac, rows) -> MapPin(mac, rows.sortedByDescending { it.lastSeen }, overrides[mac]) }
 
-    /** What is actually drawn: located devices whose category is not hidden. */
-    val mappable: List<DetectedDevice> = located.filter { it.deviceType.category !in hidden }
+    /** Pins that have somewhere to be drawn, before any filtering. */
+    val located: List<MapPin> = pins.filter { it.isLocated }
 
-    val unmappedCount: Int get() = devices.size - located.size
+    /** Pins the user hid individually (from the sheet). */
+    val hiddenByUser: List<MapPin> = located.filter { it.isHiddenByUser }
+
+    /** What is actually drawn. */
+    val mappable: List<MapPin> = located.filter { !it.isHiddenByUser && it.category !in hidden }
+
+    val unmappedCount: Int get() = pins.size - located.size
     val hiddenCount: Int get() = located.size - mappable.size
 
-    /** Categories with at least one located device, in enum order; drives the filter chips. */
+    /** Categories with at least one located pin, in enum order; drives the filter chips. */
     val presentCategories: List<DeviceCategory>
-        get() = DeviceCategory.entries.filter { c -> located.any { it.deviceType.category == c } }
+        get() = DeviceCategory.entries.filter { c -> located.any { it.category == c } }
 
-    fun locatedCount(category: DeviceCategory): Int = located.count { it.deviceType.category == category }
+    fun locatedCount(category: DeviceCategory): Int = located.count { it.category == category }
+    fun pin(mac: String): MapPin? = mappable.firstOrNull { it.macAddress == mac }
 }
 
 class MapViewModel(private val container: AppContainer) : ViewModel() {
 
     private val secure = container.secureSettings
     private val sessionManager = container.sessionManager
+    private val overrideDao = container.database.deviceOverrideDao()
 
     private val _scope = MutableStateFlow(MapScope.ALL_SESSIONS)
     private val _hidden = MutableStateFlow<Set<DeviceCategory>>(emptySet())
     private val _mapsReady = MutableStateFlow(MapsKeyInjector.isInitialized)
     private val _mapsInitFailed = MutableStateFlow(false)
+
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    /** One-line outcomes of edits, for the screen to toast. */
+    val messages: Flow<String> = _messages.receiveAsFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val devices = _scope.flatMapLatest { scope ->
@@ -94,6 +150,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     }.combine(sessionManager.currentSession) { s, session -> s.copy(sessionActive = session != null) }
         .combine(container.locationProvider.state) { s, loc -> s.copy(fix = loc.fix) }
         .combine(_hidden) { s, hidden -> s.copy(hidden = hidden) }
+        .combine(overrideDao.observeAll()) { s, overrides -> s.copy(overrides = overrides.associateBy { it.macAddress }) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())
 
     /** Inject the stored key into the Maps SDK. Safe to call on every entry to the map screen. */
@@ -109,5 +166,53 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     /** Show or hide one category's markers. */
     fun toggleCategory(category: DeviceCategory) {
         _hidden.value = if (category in _hidden.value) _hidden.value - category else _hidden.value + category
+    }
+
+    // ---- per-device edits --------------------------------------------------------------------
+
+    /** Pin the device at [point]; every session that saw this MAC now draws it there. */
+    fun setLocation(mac: String, point: GeoPoint) = edit(mac, "Pin moved") {
+        it.copy(latitude = point.latitude, longitude = point.longitude)
+    }
+
+    /** Back to the detected position. */
+    fun clearLocation(mac: String) = edit(mac, "Pin back at the detected position") {
+        it.copy(latitude = null, longitude = null)
+    }
+
+    fun setAlias(mac: String, alias: String?) {
+        val clean = alias?.trim()?.takeIf { it.isNotEmpty() }
+        edit(mac, if (clean == null) "Alias cleared" else "Alias set") { it.copy(alias = clean) }
+    }
+
+    fun setHidden(mac: String, hidden: Boolean) =
+        edit(mac, if (hidden) "Hidden from the map" else "Shown on the map again") { it.copy(hidden = hidden) }
+
+    /** Remove this device's rows from [sessionIds] (the sessions its pin currently covers). */
+    fun deleteDetections(mac: String, sessionIds: Collection<String>) {
+        viewModelScope.launch {
+            val n = runCatching { sessionManager.deleteDetections(mac, sessionIds) }
+                .onFailure { Log.e(TAG, "delete failed", it) }
+                .getOrDefault(0)
+            _messages.send(if (n == 0) "Nothing deleted" else "Deleted $n detection${if (n == 1) "" else "s"}")
+        }
+    }
+
+    private fun edit(mac: String, done: String, change: (DeviceOverride) -> DeviceOverride) {
+        val key = DetectionTable.normalizeMac(mac)
+        viewModelScope.launch {
+            runCatching {
+                val current = overrideDao.get(key) ?: DeviceOverride(key)
+                val next = change(current).copy(updatedAt = System.currentTimeMillis())
+                if (next.isEmpty) overrideDao.delete(key) else overrideDao.upsert(next)
+            }.fold(
+                onSuccess = { _messages.send(done) },
+                onFailure = { Log.e(TAG, "edit failed", it); _messages.send("Couldn't save: ${it.message}") },
+            )
+        }
+    }
+
+    private companion object {
+        const val TAG = "BirdWatch/Map"
     }
 }

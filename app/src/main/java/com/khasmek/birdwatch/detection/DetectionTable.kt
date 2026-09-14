@@ -37,6 +37,16 @@ class DetectionTable {
     }
 
     /**
+     * Forget one device (user deleted it mid-session). The next sighting will re-insert it as a
+     * new detection, which is the honest outcome: it really is still there.
+     */
+    fun remove(macAddress: String): Boolean = synchronized(lock) {
+        val removed = byMac.remove(normalizeMac(macAddress)) != null
+        if (removed) _devices.value = byMac.values.sortedByDescending { it.lastSeen }
+        removed
+    }
+
+    /**
      * Insert-or-merge. [create] is called only when [macAddress] is unseen; [merge] receives the
      * existing row otherwise. Returns the stored row and whether it was newly created. A new row
      * is also emitted on [newDetections].

@@ -119,8 +119,20 @@ app/src/main/java/com/khasmek/birdwatch/
 
 ## Data model
 
-Room schema **v3** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
-`scan_sessions.label`; both are auto-migrations, exported schemas live in `app/schemas/`).
+Room schema **v4** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
+`scan_sessions.label`, v3 -> v4 added the `device_overrides` table; all auto-migrations,
+exported schemas live in `app/schemas/`).
+
+**Per-device edits** (`data/DeviceOverride.kt`, keyed by normalised MAC so one edit covers every
+session that saw the device): corrected `latitude`/`longitude`, `alias`, `hidden`. Detected rows
+are never modified; the map applies the override on top. `MapViewModel` groups rows by MAC into
+`MapPin`s (one pin per device in "All sessions", at the override position if set, else the
+newest sighting), and the pin sheet offers Move pin (crosshair over the map centre), My
+location, Set alias, Hide, Delete (removes rows; `SessionManager.deleteDetections` also forgets
+the MAC in the live tables so the flush does not resurrect it). Move/alias are only offered
+where `DetectedDevice.hasStableIdentity` (not Meta glasses, not Remote ID drones, whose MACs
+rotate). Aliases also show on the Dashboard and session detail cards. Delete all data wipes
+overrides too. Backup/export of overrides is still to do (phase 2 of this feature).
 
 ```kotlin
 @Entity(tableName = "detected_devices", primaryKeys = ["sessionId", "macAddress"])

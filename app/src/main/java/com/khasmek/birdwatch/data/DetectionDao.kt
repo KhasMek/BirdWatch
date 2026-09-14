@@ -35,6 +35,10 @@ interface DetectionDao {
     @Query("DELETE FROM detected_devices WHERE sessionId = :sessionId")
     suspend fun deleteBySession(sessionId: String)
 
+    /** Remove one device's rows from the given sessions. Returns how many rows went. */
+    @Query("DELETE FROM detected_devices WHERE macAddress = :macAddress AND sessionId IN (:sessionIds)")
+    suspend fun deleteDevice(macAddress: String, sessionIds: List<String>): Int
+
     @Query("DELETE FROM detected_devices")
     suspend fun deleteAll()
 

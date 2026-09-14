@@ -280,6 +280,8 @@ data class SessionDetailUiState(
     val isActive: Boolean = false,
     /** True once the first query has returned, so a deleted/missing session can be told apart from "loading". */
     val loaded: Boolean = false,
+    /** User aliases by MAC (device_overrides). */
+    val aliases: Map<String, String> = emptyMap(),
 )
 
 /** One session: summary header + its devices. */
@@ -291,8 +293,12 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
         container.database.sessionDao().observeSummary(sessionId),
         sessionManager.observeSessionDevices(sessionId),
         sessionManager.currentSession.map { it?.id == sessionId },
-    ) { summary, devices, active ->
-        SessionDetailUiState(summary = summary, devices = devices, isActive = active, loaded = true)
+        container.database.deviceOverrideDao().observeAll(),
+    ) { summary, devices, active, overrides ->
+        SessionDetailUiState(
+            summary = summary, devices = devices, isActive = active, loaded = true,
+            aliases = overrides.mapNotNull { o -> o.alias?.takeIf { it.isNotBlank() }?.let { o.macAddress to it } }.toMap(),
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SessionDetailUiState())
 
     suspend fun export(format: ExportFormat): Intent? = container.exportManager.export(sessionId, format)
