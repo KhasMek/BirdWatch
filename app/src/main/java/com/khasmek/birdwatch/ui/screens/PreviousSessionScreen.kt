@@ -59,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.data.ExportFormat
 import com.khasmek.birdwatch.data.SessionSummary
+import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.BackupDialog
 import com.khasmek.birdwatch.ui.components.ConfirmDeleteDialog
@@ -88,14 +89,20 @@ fun PreviousSessionScreen(
     val scope = rememberCoroutineScope()
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
-    var exportTarget by remember { mutableStateOf<SessionSummary?>(null) }
-    var deleteTarget by remember { mutableStateOf<SessionSummary?>(null) }
+    // Dialog targets are session ids (saveable), resolved against the live list on each frame.
+    var exportTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     var showImport by rememberSaveable { mutableStateOf(false) }
     var showBackup by rememberSaveable { mutableStateOf(false) }
     var showDeleteAll by rememberSaveable { mutableStateOf(false) }
+    val exportTarget = exportTargetId?.let { id -> state.sessions.firstOrNull { it.session.id == id } }
+    val deleteTarget = deleteTargetId?.let { id -> state.sessions.firstOrNull { it.session.id == id } }
 
     // Outcomes of the long-running operations arrive here, whenever they finish.
     LaunchedEffect(Unit) { viewModel.messages.collect { toast(it) } }
+    // Counts feed the Back up / Delete all dialogs; keep them current so a dialog never opens on
+    // zeros. The summaries flow changes with every write, so this is refreshed as data changes.
+    LaunchedEffect(state.sessions) { viewModel.refreshCounts() }
 
     // ---- launchers -------------------------------------------------------------------------
 
@@ -127,9 +134,9 @@ fun PreviousSessionScreen(
 
     exportTarget?.let { target ->
         ExportFormatDialog(
-            onDismiss = { exportTarget = null },
+            onDismiss = { exportTargetId = null },
             onExport = { format ->
-                exportTarget = null
+                exportTargetId = null
                 scope.launch {
                     val intent = viewModel.export(target.session.id, format)
                     if (intent == null) toast("Session not found") else context.startActivity(intent)
@@ -140,8 +147,8 @@ fun PreviousSessionScreen(
     deleteTarget?.let { target ->
         ConfirmDeleteDialog(
             deviceCount = target.deviceCount,
-            onDismiss = { deleteTarget = null },
-            onConfirm = { viewModel.delete(target.session.id); deleteTarget = null },
+            onDismiss = { deleteTargetId = null },
+            onConfirm = { viewModel.delete(target.session.id); deleteTargetId = null },
         )
     }
     if (showImport) {
@@ -215,7 +222,7 @@ fun PreviousSessionScreen(
                             DropdownMenuItem(
                                 text = { Text("Back up…") },
                                 leadingIcon = { Icon(Icons.Default.Backup, null) },
-                                onClick = { menu = false; viewModel.refreshCounts(); showBackup = true },
+                                                onClick = { menu = false; showBackup = true },
                             )
                             DropdownMenuItem(
                                 text = { Text("Restore…") },
@@ -226,7 +233,7 @@ fun PreviousSessionScreen(
                             DropdownMenuItem(
                                 text = { Text("Delete all data…", color = MaterialTheme.colorScheme.error) },
                                 leadingIcon = { Icon(Icons.Default.DeleteForever, null, tint = MaterialTheme.colorScheme.error) },
-                                onClick = { menu = false; viewModel.refreshCounts(); showDeleteAll = true },
+                                onClick = { menu = false; showDeleteAll = true },
                             )
                         }
                     }
@@ -267,8 +274,8 @@ fun PreviousSessionScreen(
                         summary = summary,
                         isActive = summary.session.id == state.activeSessionId,
                         onClick = { onOpenSession(summary.session.id) },
-                        onExport = { exportTarget = summary },
-                        onDelete = { deleteTarget = summary },
+                        onExport = { exportTargetId = summary.session.id },
+                        onDelete = { deleteTargetId = summary.session.id },
                     )
                 }
             }
@@ -315,19 +322,22 @@ private fun SessionRow(
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${summary.deviceCount} device${if (summary.deviceCount == 1) "" else "s"}", style = MaterialTheme.typography.bodyMedium)
+                    val flockColor = DetectionColors.textForCategory(DeviceCategory.FLOCK_ALPR)
+                    val ravenColor = DetectionColors.textForCategory(DeviceCategory.GUNSHOT_DETECTOR)
+                    val otherColor = DetectionColors.textForCategory(DeviceCategory.LAW_ENFORCEMENT)
                     Spacer(Modifier.width(12.dp))
-                    Icon(Icons.Default.Videocam, null, tint = DetectionColors.Flock, modifier = Modifier.height(16.dp))
+                    Icon(Icons.Default.Videocam, "Flock", tint = flockColor, modifier = Modifier.height(16.dp))
                     Spacer(Modifier.width(3.dp))
-                    Text("${summary.flockCount}", style = MaterialTheme.typography.bodyMedium, color = DetectionColors.Flock)
+                    Text("${summary.flockCount}", style = MaterialTheme.typography.bodyMedium, color = flockColor)
                     Spacer(Modifier.width(10.dp))
-                    Icon(Icons.Default.Hearing, null, tint = DetectionColors.Raven, modifier = Modifier.height(16.dp))
+                    Icon(Icons.Default.Hearing, "Raven", tint = ravenColor, modifier = Modifier.height(16.dp))
                     Spacer(Modifier.width(3.dp))
-                    Text("${summary.ravenCount}", style = MaterialTheme.typography.bodyMedium, color = DetectionColors.Raven)
+                    Text("${summary.ravenCount}", style = MaterialTheme.typography.bodyMedium, color = ravenColor)
                     if (summary.otherCount > 0) {
                         Spacer(Modifier.width(10.dp))
-                        Icon(Icons.Default.Category, null, tint = DetectionColors.LawEnforcement, modifier = Modifier.height(16.dp))
+                        Icon(Icons.Default.Category, "Other", tint = otherColor, modifier = Modifier.height(16.dp))
                         Spacer(Modifier.width(3.dp))
-                        Text("${summary.otherCount}", style = MaterialTheme.typography.bodyMedium, color = DetectionColors.LawEnforcement)
+                        Text("${summary.otherCount}", style = MaterialTheme.typography.bodyMedium, color = otherColor)
                     }
                 }
             }

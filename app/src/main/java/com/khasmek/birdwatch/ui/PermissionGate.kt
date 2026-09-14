@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,8 +59,10 @@ fun PermissionGate(content: @Composable () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var granted by remember { mutableStateOf(Permissions.allEssentialGranted(context)) }
-    var hasAskedOnce by remember { mutableStateOf(false) }
-    var permanentlyDenied by remember { mutableStateOf(false) }
+    // Saveable: a rotation while the system dialog is up must not queue a second request, and a
+    // permanent denial must not be forgotten.
+    var hasAskedOnce by rememberSaveable { mutableStateOf(false) }
+    var permanentlyDenied by rememberSaveable { mutableStateOf(false) }
 
     fun refresh() {
         granted = Permissions.allEssentialGranted(context)
@@ -79,9 +82,13 @@ fun PermissionGate(content: @Composable () -> Unit) {
         refresh()
     }
 
-    // Ask immediately on launch, before anything else.
+    // Ask immediately on first launch, before anything else. The launcher is re-registered under
+    // the same saved key after a recreation, so a dialog already showing still delivers its result.
     LaunchedEffect(Unit) {
-        if (!granted) launcher.launch(Permissions.all.toTypedArray())
+        if (!granted && !hasAskedOnce) {
+            hasAskedOnce = true
+            launcher.launch(Permissions.all.toTypedArray())
+        }
     }
 
     // Re-check when returning to the foreground (e.g. after the system Settings screen).
@@ -100,12 +107,14 @@ fun PermissionGate(content: @Composable () -> Unit) {
             permanentlyDenied = permanentlyDenied,
             onRequest = { launcher.launch(Permissions.all.toTypedArray()) },
             onOpenSettings = {
-                context.startActivity(
-                    Intent(
-                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.fromParts("package", context.packageName, null)
-                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
+                runCatching {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
             }
         )
     }

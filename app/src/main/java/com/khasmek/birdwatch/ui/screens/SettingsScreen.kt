@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -45,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -137,7 +139,8 @@ fun SettingsScreen(
                 ) { Text("Clear") }
             }
             TextButton(onClick = {
-                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.HELP_URL)))
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.HELP_URL))) }
+                    .onFailure { toast("No browser available to open ${SettingsViewModel.HELP_URL}") }
             }) {
                 Text("How to get a Maps API key")
                 Spacer(Modifier.width(6.dp))
@@ -155,7 +158,10 @@ fun SettingsScreen(
                 checked = state.audioAlerts,
                 onCheckedChange = viewModel::setAudioAlerts,
             )
-            TextButton(onClick = viewModel::playTestChirp, enabled = state.audioAlerts) { Text("Play test chirp") }
+            TextButton(
+                onClick = { if (!viewModel.playTestChirp()) toast("Alert tones are still loading; try again in a moment.") },
+                enabled = state.audioAlerts,
+            ) { Text("Play test chirp") }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
@@ -233,6 +239,11 @@ private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 4.dp))
 }
 
+/**
+ * A setting with a switch. The whole row is the toggle (one accessibility node announced as
+ * "<title>, switch, on/off"; the full row is the touch target), so the Switch itself has no
+ * separate click handler.
+ */
 @Composable
 private fun ToggleRow(
     title: String,
@@ -244,6 +255,7 @@ private fun ToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -265,6 +277,6 @@ private fun ToggleRow(
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = null)
     }
 }

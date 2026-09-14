@@ -1,6 +1,5 @@
 package com.khasmek.birdwatch.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,6 +8,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.khasmek.birdwatch.data.ExportFormat
 import com.khasmek.birdwatch.data.ParsedBackup
@@ -42,12 +44,12 @@ private fun CategoryPicker(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onToggle(c) }
+                .toggleable(value = c in selected, role = Role.Checkbox, onValueChange = { onToggle(c) })
                 .padding(vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(checked = c in selected, onCheckedChange = { onToggle(c) })
-            Icon(categoryIcon(c), contentDescription = null, tint = DetectionColors.forCategory(c), modifier = Modifier.height(18.dp))
+            Checkbox(checked = c in selected, onCheckedChange = null)
+            Icon(categoryIcon(c), contentDescription = null, tint = DetectionColors.textForCategory(c), modifier = Modifier.height(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(c.label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             Text(
@@ -88,11 +90,11 @@ fun BackupDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { format = f }
+                                .selectable(selected = format == f, role = Role.RadioButton, onClick = { format = f })
                                 .padding(vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(selected = format == f, onClick = { format = f })
+                            RadioButton(selected = format == f, onClick = null)
                             Column {
                                 Text(f.label, style = MaterialTheme.typography.bodyLarge)
                                 Text(

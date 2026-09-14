@@ -1,6 +1,7 @@
 package com.khasmek.birdwatch.ui.navigation
 
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -67,7 +68,11 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
                     } == true
                     NavigationBarItem(
                         selected = selected,
-                        onClick = { navController.navigateToTab(tab) },
+                        // Re-tapping the selected tab returns to its root (e.g. from a session's detail).
+                        onClick = {
+                            if (selected) navController.popBackStack(tab.route, inclusive = false)
+                            else navController.navigateToTab(tab)
+                        },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
                         label = { Text(tab.label) }
                     )
@@ -78,9 +83,12 @@ fun AppNavigation(navController: NavHostController = rememberNavController()) {
         NavHost(
             navController = navController,
             startDestination = AppTab.Dashboard.route,
+            // consumeWindowInsets: the bottom bar's height is applied as padding here, so each
+            // screen's own Scaffold must not add the navigation-bar inset a second time.
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
         ) {
             composable(AppTab.Dashboard.route) { DashboardScreen() }
             composable(AppTab.Map.route) {

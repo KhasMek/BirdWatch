@@ -54,10 +54,12 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             mapsApiKey = key,
             audioAlerts = audio,
             lowPowerScan = lowPower,
-            restartRequired = key != null && MapsKeyInjector.needsRestartFor(key),
             enabledPacks = packs,
         )
     }.combine(settings.wifiApScan) { s, wifi -> s.copy(wifiApScan = wifi) }
+        // Reactive, so the hint appears the moment a different key is saved and never disappears
+        // while the SDK still holds the old one.
+        .combine(MapsKeyInjector.keyInUse) { s, inUse -> s.copy(restartRequired = s.mapsApiKey != null && inUse != null && inUse != s.mapsApiKey) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     /** Validate format and persist. Returns the outcome for the screen to toast. */
@@ -92,7 +94,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setLowPowerScan(enabled: Boolean) = settings.setLowPowerScan(enabled)
     fun setPackEnabled(pack: PackId, enabled: Boolean) = settings.setPackEnabled(pack, enabled)
     fun setWifiApScan(enabled: Boolean) = settings.setWifiApScan(enabled)
-    fun playTestChirp() = container.alertSounds.playTest()
+    /** False if the tones are not ready yet (they are synthesised on first use). */
+    fun playTestChirp(): Boolean = container.alertSounds.playTest()
 
     companion object {
         private const val TAG = "BirdWatch/Settings"

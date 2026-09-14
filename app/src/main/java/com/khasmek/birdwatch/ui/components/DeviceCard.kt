@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.khasmek.birdwatch.detection.Confidence
 import com.khasmek.birdwatch.detection.DetectedDevice
@@ -50,6 +51,7 @@ import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.detection.DeviceType
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
+import java.util.Locale
 
 /**
  * One detected device. Collapsed: type badge, name/MAC, method tag, RSSI bars, last seen.
@@ -81,6 +83,7 @@ fun DeviceCard(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = device.macAddress,
@@ -120,7 +123,7 @@ fun DeviceCard(
                     HorizontalDivider()
                     Spacer(Modifier.height(8.dp))
                     DetailRow("Location", if (device.hasLocation) {
-                        "%.5f, %.5f".format(device.latitude, device.longitude) +
+                        coords(device.latitude!!, device.longitude!!) +
                             (device.accuracyMeters?.let { " (±${it.toInt()} m)" } ?: "")
                     } else "No GPS fix at detection")
                     DetailRow("First seen", TimeFormat.clock(device.firstSeen))
@@ -136,12 +139,12 @@ fun DeviceCard(
                         if (device.hasTargetLocation) {
                             DetailRow(
                                 "Drone position",
-                                "%.5f, %.5f".format(device.targetLatitude, device.targetLongitude) +
-                                    (device.targetAltitudeM?.let { "  alt %.0f m".format(it) } ?: ""),
+                                coords(device.targetLatitude!!, device.targetLongitude!!) +
+                                    (device.targetAltitudeM?.let { "  alt ${it.toInt()} m" } ?: ""),
                             )
                         }
                         if (device.hasOperatorLocation) {
-                            DetailRow("Operator", "%.5f, %.5f".format(device.operatorLatitude, device.operatorLongitude))
+                            DetailRow("Operator", coords(device.operatorLatitude!!, device.operatorLongitude!!))
                         }
                     }
                 }
@@ -149,6 +152,9 @@ fun DeviceCard(
         }
     }
 }
+
+/** "37.12345, -122.98765": always a dot for the decimal point, whatever the phone's locale. */
+fun coords(lat: Double, lon: Double): String = String.format(Locale.US, "%.5f, %.5f", lat, lon)
 
 /** Icon per category, shared with the stats bar and session rows. */
 fun categoryIcon(category: DeviceCategory): ImageVector = when (category) {
@@ -168,7 +174,7 @@ private fun TypeBadge(type: DeviceType, color: Color) {
             .background(color, RoundedCornerShape(10.dp))
             .padding(horizontal = 8.dp, vertical = 6.dp),
     ) {
-        Icon(icon, contentDescription = type.label, tint = DetectionColors.OnAccent, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = null, tint = DetectionColors.OnAccent, modifier = Modifier.size(20.dp))
         Text(
             text = type.label,
             style = MaterialTheme.typography.labelSmall,
@@ -179,7 +185,7 @@ private fun TypeBadge(type: DeviceType, color: Color) {
 
 @Composable
 private fun SourceTag(source: DetectionSource) {
-    val color = DetectionColors.forSource(source)
+    val color = DetectionColors.textForSource(source)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -192,7 +198,7 @@ private fun SourceTag(source: DetectionSource) {
                 DetectionSource.ESP32_WIFI -> Icons.Default.Usb
                 DetectionSource.PHONE_WIFI -> Icons.Default.Wifi
             },
-            contentDescription = source.label,
+            contentDescription = null, // the text beside it names the source
             tint = color,
             modifier = Modifier.size(12.dp),
         )

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 enum class MapScope(val label: String) { CURRENT_SESSION("This session"), ALL_SESSIONS("All sessions") }
 
@@ -21,6 +22,8 @@ data class MapUiState(
     val apiKey: String? = null,
     val mapsReady: Boolean = false,
     val mapsInitFailed: Boolean = false,
+    /** The SDK is still running on a previously saved key; the new one applies after a restart. */
+    val staleKey: Boolean = false,
     val scope: MapScope = MapScope.ALL_SESSIONS,
     val devices: List<DetectedDevice> = emptyList(),
     val sessionActive: Boolean = false,
@@ -48,7 +51,16 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private val mapsState = combine(_mapsReady, _mapsInitFailed) { ready, failed -> ready to failed }
+    private val mapsState = combine(_mapsReady, _mapsInitFailed, MapsKeyInjector.keyInUse) { ready, failed, inUse -> Triple(ready, failed, inUse) }
+
+    init {
+        // "This session" only makes sense while one is running; fall back when it ends.
+        viewModelScope.launch {
+            sessionManager.currentSession.collect { session ->
+                if (session == null && _scope.value == MapScope.CURRENT_SESSION) _scope.value = MapScope.ALL_SESSIONS
+            }
+        }
+    }
 
     val uiState: StateFlow<MapUiState> = combine(
         secure.isLoaded,
@@ -56,8 +68,12 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         mapsState,
         _scope,
         devices,
-    ) { loaded, key, (ready, failed), scope, devices ->
-        MapUiState(loaded = loaded, apiKey = key, mapsReady = ready, mapsInitFailed = failed, scope = scope, devices = devices)
+    ) { loaded, key, (ready, failed, inUse), scope, devices ->
+        MapUiState(
+            loaded = loaded, apiKey = key, mapsReady = ready, mapsInitFailed = failed,
+            staleKey = key != null && inUse != null && inUse != key,
+            scope = scope, devices = devices,
+        )
     }.combine(sessionManager.currentSession) { s, session -> s.copy(sessionActive = session != null) }
         .combine(container.locationProvider.state) { s, loc -> s.copy(fix = loc.fix) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())

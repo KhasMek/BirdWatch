@@ -19,8 +19,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * Manual dependency container. Singletons are created lazily on first use so that nothing
- * touches Bluetooth or GPS before permissions are granted.
+ * Manual dependency container. Singletons are lazy, but `BirdWatchApp.onCreate` touches
+ * `sessionManager` (and so builds every radio wrapper) right away so their broadcast receivers
+ * are registered from the start. That is safe before permissions are granted: the constructors
+ * only register receivers and read system-service handles; nothing scans, opens a port or asks
+ * for a fix until a session starts, which the permission gate in `MainActivity` sits in front of.
  */
 class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext

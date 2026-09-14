@@ -1,6 +1,7 @@
 package com.khasmek.birdwatch.ui.screens
 
 import android.content.Intent
+import android.widget.Toast
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
@@ -91,7 +92,10 @@ fun AboutScreen(onBack: () -> Unit) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(src.url))) }
+                        .clickable {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(src.url))) }
+                                .onFailure { Toast.makeText(context, "No browser available to open ${src.url}", Toast.LENGTH_LONG).show() }
+                        }
                         .padding(vertical = 8.dp)
                 ) {
                     Text(src.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)

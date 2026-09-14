@@ -67,10 +67,10 @@ fun StatsBar(
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 CountStat("Devices", total, MaterialTheme.colorScheme.onSurface)
-                CountStat("Flock", flock, DetectionColors.Flock, categoryIcon(DeviceCategory.FLOCK_ALPR))
-                CountStat("Raven", raven, DetectionColors.Raven, categoryIcon(DeviceCategory.GUNSHOT_DETECTOR))
+                CountStat("Flock", flock, DetectionColors.textForCategory(DeviceCategory.FLOCK_ALPR), categoryIcon(DeviceCategory.FLOCK_ALPR))
+                CountStat("Raven", raven, DetectionColors.textForCategory(DeviceCategory.GUNSHOT_DETECTOR), categoryIcon(DeviceCategory.GUNSHOT_DETECTOR))
                 if (showOther) {
-                    CountStat("Other", other, DetectionColors.LawEnforcement, Icons.Default.Category)
+                    CountStat("Other", other, DetectionColors.textForCategory(DeviceCategory.LAW_ENFORCEMENT), Icons.Default.Category)
                 }
             }
             Spacer(Modifier.height(10.dp))
@@ -148,7 +148,8 @@ private fun CountStat(label: String, value: Int, color: Color, icon: ImageVector
 private fun StatusStat(icon: ImageVector, label: String, detail: String?, active: Boolean) {
     val tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(18.dp))
+        // The label next to it is the accessible name; a description here would be read twice.
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(4.dp))
         Column {
             Text(label, style = MaterialTheme.typography.labelMedium, color = tint)

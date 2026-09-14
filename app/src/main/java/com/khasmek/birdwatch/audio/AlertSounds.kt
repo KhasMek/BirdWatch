@@ -29,11 +29,14 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
 
     private val appContext = context.applicationContext
 
+    // ASSISTANCE_SONIFICATION rather than NOTIFICATION_EVENT: a detection chirp is feedback the user
+    // asked for while driving, and must not be silenced by Do Not Disturb or a muted notification
+    // stream the way a notification sound would be. It follows the media/system volume instead.
     private val soundPool = SoundPool.Builder()
         .setMaxStreams(2)
         .setAudioAttributes(
             AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
         )
@@ -64,12 +67,12 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
         play(id)
     }
 
-    /** Preview for the settings screen. */
-    fun playTest() = play(chirpId)
+    /** Preview for the settings screen. False if the tones are not loaded yet. */
+    fun playTest(): Boolean = play(chirpId)
 
-    private fun play(id: Int) {
-        if (id == 0 || synchronized(loaded) { id !in loaded }) return
-        soundPool.play(id, 1f, 1f, 1, 0, 1f)
+    private fun play(id: Int): Boolean {
+        if (id == 0 || synchronized(loaded) { id !in loaded }) return false
+        return soundPool.play(id, 1f, 1f, 1, 0, 1f) != 0
     }
 
     private fun loadTones() {

@@ -1,12 +1,12 @@
 package com.khasmek.birdwatch.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.khasmek.birdwatch.usb.UsbCompanion
 
@@ -47,11 +48,11 @@ fun ImportFromEsp32Dialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { selected = s }
+                            .selectable(selected = selected == s, role = Role.RadioButton, onClick = { selected = s })
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        RadioButton(selected = selected == s, onClick = { selected = s })
+                        RadioButton(selected = selected == s, onClick = null)
                         Column {
                             Text(
                                 when (s) {

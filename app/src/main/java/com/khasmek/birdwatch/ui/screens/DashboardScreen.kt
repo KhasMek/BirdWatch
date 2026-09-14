@@ -44,6 +44,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +72,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var showExport by remember { mutableStateOf(false) }
+    var showExport by rememberSaveable { mutableStateOf(false) }
 
     if (showExport) {
         ExportFormatDialog(
@@ -117,9 +118,13 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                             Icon(Icons.Default.Share, contentDescription = "Export this session")
                         }
                     }
-                    if (state.usb.status == UsbStatus.DISCONNECTED || state.usb.status == UsbStatus.PERMISSION_NEEDED) {
+                    // ERROR included: after "Could not open USB device" the user needs a way to retry
+                    // without unplugging the board.
+                    if (state.usb.status == UsbStatus.DISCONNECTED || state.usb.status == UsbStatus.PERMISSION_NEEDED ||
+                        state.usb.status == UsbStatus.ERROR
+                    ) {
                         IconButton(onClick = viewModel::connectUsb) {
-                            Icon(Icons.Default.Usb, contentDescription = "Connect ESP32")
+                            Icon(Icons.Default.Usb, contentDescription = if (state.usb.status == UsbStatus.ERROR) "Retry ESP32 connection" else "Connect ESP32")
                         }
                     }
                     IconButton(onClick = viewModel::toggleAudio) {
@@ -258,7 +263,7 @@ private fun CategoryFilterRow(
                 onClick = { onSelect(if (selected == c) null else c) },
                 label = { Text(c.shortLabel) },
                 leadingIcon = {
-                    Icon(categoryIcon(c), contentDescription = null, tint = DetectionColors.forCategory(c), modifier = Modifier.height(16.dp))
+                    Icon(categoryIcon(c), contentDescription = null, tint = DetectionColors.textForCategory(c), modifier = Modifier.height(16.dp))
                 },
             )
         }

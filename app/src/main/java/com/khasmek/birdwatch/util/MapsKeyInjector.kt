@@ -5,6 +5,9 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import com.google.android.gms.maps.MapsInitializer
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Feeds the user-provided Google Maps API key to the Maps SDK at runtime.
@@ -15,29 +18,36 @@ import com.google.android.gms.maps.MapsInitializer
  * before any `GoogleMap` composable exists, then runs [MapsInitializer].
  *
  * Once the SDK has read a key it caches it for the life of the process, so changing the key
- * afterwards needs an app restart; [keyInUse] lets the UI say so.
+ * afterwards needs an app restart. [keyInUse] is therefore set exactly once per process and never
+ * overwritten; the UI compares it with the stored key to say "restart required".
  */
 object MapsKeyInjector {
     private const val TAG = "BirdWatch/MapsKey"
     const val META_KEY = "com.google.android.geo.API_KEY"
 
-    /** The key the SDK was initialised with in this process, or null if no map has been set up yet. */
-    @Volatile
-    var keyInUse: String? = null
-        private set
+    private val _keyInUse = MutableStateFlow<String?>(null)
 
-    val isInitialized: Boolean get() = keyInUse != null
+    /** The key the SDK was initialised with in this process, or null if no map has been set up yet. */
+    val keyInUse: StateFlow<String?> = _keyInUse.asStateFlow()
+
+    val isInitialized: Boolean get() = _keyInUse.value != null
 
     /** True if the SDK already holds a different key than [key] and a restart is needed. */
-    fun needsRestartFor(key: String): Boolean = keyInUse != null && keyInUse != key
+    fun needsRestartFor(key: String): Boolean = _keyInUse.value.let { it != null && it != key }
 
     /**
-     * Inject [key] and initialise the SDK. Idempotent for the same key. Returns false if the
-     * meta-data could not be written (the map would then use the empty placeholder and show
-     * gray tiles).
+     * Inject [key] and initialise the SDK. Idempotent for the same key. If the SDK was already
+     * initialised with a different key this is a no-op that returns true: the map keeps working
+     * with the old key until the process restarts, and [keyInUse] keeps saying which key that is.
+     * Returns false only if the meta-data could not be written or the SDK failed to initialise
+     * (the map would then show gray tiles).
      */
     fun initialize(context: Context, key: String): Boolean {
-        if (keyInUse == key) return true
+        val current = _keyInUse.value
+        if (current != null) {
+            if (current != key) Log.i(TAG, "Maps SDK already holds a different key; restart needed for the new one")
+            return true
+        }
         val app = context.applicationContext
         var ok = false
         try {
@@ -65,7 +75,7 @@ object MapsKeyInjector {
             Log.e(TAG, "MapsInitializer failed", e)
             return false
         }
-        keyInUse = key
+        _keyInUse.value = key
         return true
     }
 }

@@ -18,7 +18,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /** What tapping a status message's button should do. */
 enum class StatusAction(val label: String) {
@@ -107,6 +110,14 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
 
     private val sessionManager = container.sessionManager
     private val filter = MutableStateFlow<DeviceCategory?>(null)
+
+    init {
+        // A filter belongs to the session it was chosen in; carrying "Raven only" into the next
+        // session would hide every new Flock hit behind an empty list while the chirps play.
+        viewModelScope.launch {
+            sessionManager.currentSession.map { it?.id }.distinctUntilChanged().collect { filter.value = null }
+        }
+    }
 
     private val radios = combine(
         container.bleScanner.status,

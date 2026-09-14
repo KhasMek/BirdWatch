@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,11 +55,30 @@ import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
 import com.khasmek.birdwatch.ui.components.DeviceCard
+import com.khasmek.birdwatch.ui.components.coords
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.Permissions
 
-/** What the user tapped on the map: a device's own marker, or a Remote ID operator marker. */
-private data class MapSelection(val device: DetectedDevice, val isOperator: Boolean)
+/**
+ * What the user tapped on the map: a device's own marker, or a Remote ID operator marker. Keyed
+ * by session + MAC because "All sessions" can hold the same MAC several times, and stored as a
+ * string so it survives rotation via rememberSaveable.
+ */
+private data class MapSelection(val sessionId: String, val macAddress: String, val isOperator: Boolean) {
+    fun matches(d: DetectedDevice) = d.sessionId == sessionId && d.macAddress == macAddress
+    fun encode() = "$sessionId|$macAddress|${if (isOperator) 1 else 0}"
+
+    companion object {
+        fun of(d: DetectedDevice, isOperator: Boolean) = MapSelection(d.sessionId, d.macAddress, isOperator)
+        fun decode(s: String?): MapSelection? {
+            val parts = s?.split('|') ?: return null
+            if (parts.size != 3) return null
+            return MapSelection(parts[0], parts[1], parts[2] == "1")
+        }
+    }
+}
+
+private fun markerKey(d: DetectedDevice) = "${d.sessionId}|${d.macAddress}"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,8 +118,11 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(39.5, -98.35), 3.5f) // continental US until we know better
     }
-    var framed by remember { mutableStateOf(false) }
-    var selection by remember { mutableStateOf<MapSelection?>(null) }
+    // Both survive rotation and tab switches: the camera is saveable already, and re-framing
+    // would yank the user away from wherever they had panned.
+    var framed by rememberSaveable { mutableStateOf(false) }
+    var selectionKey by rememberSaveable { mutableStateOf<String?>(null) }
+    val selection = remember(selectionKey) { MapSelection.decode(selectionKey) }
 
     // Frame the markers the first time we have any; otherwise centre on the phone's fix.
     val mappable = state.mappable
@@ -112,14 +135,15 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
                 else if (it.hasLocation) b.include(LatLng(it.latitude!!, it.longitude!!))
                 if (it.hasOperatorLocation) b.include(LatLng(it.operatorLatitude!!, it.operatorLongitude!!))
             }
+            // Only a successful animation counts as framed; a failure (map not ready yet) leaves
+            // it false so the next change of inputs tries again.
             runCatching {
                 if (mappable.size == 1 && !mappable[0].hasOperatorLocation) {
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(b.build().center, 15f))
                 } else {
                     cameraPositionState.animate(CameraUpdateFactory.newLatLngBounds(b.build(), 120))
                 }
-            }
-            framed = true
+            }.onSuccess { framed = true }
         } else if (state.fix != null) {
             runCatching {
                 cameraPositionState.animate(
@@ -129,8 +153,10 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
         }
     }
 
-    // Keep the sheet's device fresh while a session updates rows (RSSI, sightings, drone position).
-    val selectedLive = selection?.let { sel -> state.devices.firstOrNull { it.macAddress == sel.device.macAddress }?.let { sel.copy(device = it) } ?: sel }
+    // The sheet shows the live row for the tapped marker (RSSI, sightings, drone position keep
+    // updating during a session). If the row is gone (session deleted), the sheet closes.
+    val selectedDevice = selection?.let { sel -> state.devices.firstOrNull(sel::matches) }
+    LaunchedEffect(selection, selectedDevice == null) { if (selection != null && selectedDevice == null) selectionKey = null }
 
     Column(Modifier.fillMaxSize()) {
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
@@ -157,6 +183,14 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
                 )
             }
         }
+        if (state.staleKey) {
+            Text(
+                "Map is still using the previously saved key. Restart the app to switch to the new one.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
 
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
@@ -165,12 +199,13 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
             uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = hasLocationPermission),
         ) {
             // Stable keys: the list is re-sorted on every re-sighting, and without keys Compose would
-            // tear down and recreate marker nodes, dropping any tap in flight.
+            // tear down and recreate marker nodes, dropping any tap in flight. Session + MAC, since
+            // "All sessions" can contain the same MAC from several sessions.
             mappable.forEach { device ->
-                key(device.macAddress) {
-                    DeviceMarker(device, onClick = { selection = MapSelection(device, isOperator = false) })
+                key(markerKey(device)) {
+                    DeviceMarker(device, onClick = { selectionKey = MapSelection.of(device, isOperator = false).encode() })
                     if (device.hasOperatorLocation) {
-                        OperatorMarker(device, onClick = { selection = MapSelection(device, isOperator = true) })
+                        OperatorMarker(device, onClick = { selectionKey = MapSelection.of(device, isOperator = true).encode() })
                     }
                 }
             }
@@ -179,26 +214,27 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
 
     // Details live in our own bottom sheet rather than the SDK's info window, which renders a
     // detached ComposeView into a bitmap and comes out empty on current Compose versions.
-    selectedLive?.let { sel ->
-        ModalBottomSheet(onDismissRequest = { selection = null }) {
+    if (selection != null && selectedDevice != null) {
+        val device = selectedDevice
+        ModalBottomSheet(onDismissRequest = { selectionKey = null }) {
             Column(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .navigationBarsPadding()
             ) {
-                if (sel.isOperator) {
+                if (selection.isOperator && device.hasOperatorLocation) {
                     Text("Remote ID operator", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Position reported by the drone's own broadcast (System message), which may be the takeoff point rather than the pilot's live position.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    sel.device.operatorId?.let {
+                    device.operatorId?.let {
                         Text("Operator ID $it", style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace)
                     }
                     Text(
-                        "%.5f, %.5f".format(sel.device.operatorLatitude, sel.device.operatorLongitude),
+                        coords(device.operatorLatitude!!, device.operatorLongitude!!),
                         style = MaterialTheme.typography.bodyMedium,
                         fontFamily = FontFamily.Monospace,
                     )
@@ -207,14 +243,14 @@ private fun MapContent(state: MapUiState, onScopeChange: (MapScope) -> Unit) {
                     Spacer(Modifier.height(4.dp))
                 } else {
                     Text(
-                        if (sel.device.hasTargetLocation) "Marker is the drone's self-reported position"
+                        if (device.hasTargetLocation) "Marker is the drone's self-reported position"
                         else "Marker is where the phone was when this was detected",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                 }
-                DeviceCard(device = sel.device, now = System.currentTimeMillis(), initiallyExpanded = true)
+                DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true)
                 Spacer(Modifier.height(24.dp))
             }
         }
