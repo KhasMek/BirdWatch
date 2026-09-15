@@ -31,9 +31,9 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # No setup-android step: the runner image ships the SDK (ANDROID_HOME set, licences
+      # accepted) and AGP downloads any missing platform/build-tools itself. The action's own
+      # `sdkmanager tools` call broke once Google dropped the legacy "tools" package.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 

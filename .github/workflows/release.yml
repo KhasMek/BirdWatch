@@ -71,9 +71,8 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # No setup-android step (see ci.yml): the runner image ships the SDK and AGP fetches what
+      # it needs; apksigner below comes from the image's build-tools.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
