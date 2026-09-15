@@ -11,7 +11,14 @@ import kotlinx.coroutines.withContext
 /** A backup ready to be written: the user picks where it goes. */
 data class BackupPayload(val fileName: String, val format: ExportFormat, val text: String, val sessionCount: Int, val deviceCount: Int)
 
-data class RestoreResult(val sessionsAdded: Int, val sessionsMerged: Int, val devicesAdded: Int, val devicesUpdated: Int)
+data class RestoreResult(
+    val sessionsAdded: Int,
+    val sessionsMerged: Int,
+    val devicesAdded: Int,
+    val devicesUpdated: Int,
+    /** Per-device edits (alias / moved pin / hidden) written because the file's were newer or new. */
+    val editsApplied: Int = 0,
+)
 
 /**
  * Whole-database backup and restore, filtered by detection category.
@@ -39,13 +46,14 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
     ): BackupPayload = withContext(Dispatchers.Default) {
         val sessions = db.sessionDao().getAll()
         val bySession = db.detectionDao().getAll().groupBy { it.sessionId }
+        val overrides = db.deviceOverrideDao().getAll().associateBy { it.macAddress }
         val bundles = sessions.map { s ->
             SessionBundle(s, bySession[s.id].orEmpty().filter { it.deviceType.category in categories })
         }.filter { it.devices.isNotEmpty() }
         BackupPayload(
             fileName = fileName,
             format = format,
-            text = BackupWriter.write(format, bundles, categories, now),
+            text = BackupWriter.write(format, bundles, categories, now, overrides),
             sessionCount = bundles.size,
             deviceCount = bundles.sumOf { it.devices.size },
         )
@@ -66,7 +74,7 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
      */
     suspend fun restore(backup: ParsedBackup, categories: Set<DeviceCategory>): RestoreResult {
         val filtered = backup.filtered(categories)
-        var sessionsAdded = 0; var sessionsMerged = 0; var devicesAdded = 0; var devicesUpdated = 0
+        var sessionsAdded = 0; var sessionsMerged = 0; var devicesAdded = 0; var devicesUpdated = 0; var editsApplied = 0
         db.withTransaction {
             filtered.sessions.forEach { b ->
                 if (db.sessionDao().getById(b.session.id) == null) {
@@ -85,9 +93,10 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
                 }
                 if (toWrite.isNotEmpty()) db.detectionDao().upsertAll(toWrite)
             }
+            editsApplied = applyOverrides(db, filtered.overrides)
         }
-        Log.i(TAG, "Restore: +$sessionsAdded sessions, $sessionsMerged merged, +$devicesAdded devices, $devicesUpdated updated")
-        return RestoreResult(sessionsAdded, sessionsMerged, devicesAdded, devicesUpdated)
+        Log.i(TAG, "Restore: +$sessionsAdded sessions, $sessionsMerged merged, +$devicesAdded devices, $devicesUpdated updated, $editsApplied edits")
+        return RestoreResult(sessionsAdded, sessionsMerged, devicesAdded, devicesUpdated, editsApplied)
     }
 
     /** Wipe every session, detection and per-device edit. The caller stops a running session first. */
@@ -102,5 +111,24 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
 
     companion object {
         private const val TAG = "BirdWatch/Backup"
+
+        /**
+         * Write the file's per-device edits, but never over a newer edit made on this phone: an
+         * incoming override wins only when the MAC has none locally or its `updatedAt` is later.
+         * Returns how many were written. Call inside a transaction.
+         */
+        suspend fun applyOverrides(db: DetectionDatabase, incoming: List<DeviceOverride>): Int {
+            var applied = 0
+            val dao = db.deviceOverrideDao()
+            incoming.forEach { o ->
+                if (o.isEmpty) return@forEach
+                val local = dao.get(o.macAddress)
+                if (local == null || o.updatedAt > local.updatedAt) {
+                    dao.upsert(o)
+                    applied++
+                }
+            }
+            return applied
+        }
     }
 }

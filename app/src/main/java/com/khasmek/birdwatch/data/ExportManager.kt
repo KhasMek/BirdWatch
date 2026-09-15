@@ -23,8 +23,11 @@ class ExportManager(context: Context, private val db: DetectionDatabase) {
     suspend fun exportToFile(sessionId: String, format: ExportFormat): File? = withContext(Dispatchers.IO) {
         val session = db.sessionDao().getById(sessionId) ?: return@withContext null
         val devices = db.detectionDao().getBySession(sessionId)
+        // Per-device edits (moved pins, aliases, hidden) are applied on the way out.
+        val macs = devices.map { it.macAddress }.toSet()
+        val overrides = db.deviceOverrideDao().getAll().filter { it.macAddress in macs }.associateBy { it.macAddress }
         val file = File(dir, ExportWriter.fileName(format, session))
-        file.writeText(ExportWriter.write(format, session, devices))
+        file.writeText(ExportWriter.write(format, session, devices, overrides = overrides))
         prune(keep = file)
         Log.i(TAG, "Exported ${devices.size} devices to ${file.name}")
         file

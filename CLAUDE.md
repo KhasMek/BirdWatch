@@ -132,7 +132,16 @@ location, Set alias, Hide, Delete (removes rows; `SessionManager.deleteDetection
 the MAC in the live tables so the flush does not resurrect it). Move/alias are only offered
 where `DetectedDevice.hasStableIdentity` (not Meta glasses, not Remote ID drones, whose MACs
 rotate). Aliases also show on the Dashboard and session detail cards. Delete all data wipes
-overrides too. Backup/export of overrides is still to do (phase 2 of this feature).
+overrides too.
+
+Edits travel with the files: `ExportWriter` takes an `Overrides` map and writes the
+*corrected* position as `latitude`/`longitude`, adds `alias`, and (JSON) a `user_edit` object
+with `position_edited`, `detected_latitude/longitude`, `hidden`, `updated_at` (CSV: the same as
+extra columns `alias`, `position_edited`, `detected_*`, `hidden`, `edited_at`). KML uses the
+alias and corrected point and omits hidden devices. `ExportReader` reverses this, so rows come
+back with the detected fix and `ImportedSession.overrides` / `ParsedBackup.overrides` carry the
+edits. `BackupManager.applyOverrides` writes an incoming edit only if the MAC has none locally or
+the file's `updatedAt` is newer; import and restore both call it.
 
 ```kotlin
 @Entity(tableName = "detected_devices", primaryKeys = ["sessionId", "macAddress"])

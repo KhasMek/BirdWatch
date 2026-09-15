@@ -112,6 +112,27 @@ class BackupTest {
     }
 
     @Test
+    fun `device edits travel with a backup, one per mac, newest wins, dropped with their category`() {
+        val sameMacInS2 = flock1.copy(sessionId = "s2")
+        val bundlesWithDup = listOf(SessionBundle(s1, listOf(flock1, raven1)), SessionBundle(s2, listOf(axon2, sameMacInS2)))
+        val flockEdit = DeviceOverride(flock1.macAddress, latitude = 1.5, longitude = 2.5, alias = "North gate", updatedAt = 9_000L)
+        val axonEdit = DeviceOverride(axon2.macAddress, hidden = true, updatedAt = 8_000L)
+        val overrides = mapOf(flockEdit.macAddress to flockEdit, axonEdit.macAddress to axonEdit)
+
+        for (text in listOf(BackupWriter.json(bundlesWithDup, allCats, 0L, overrides), BackupWriter.csv(bundlesWithDup, overrides))) {
+            val back = BackupReader.parse(text)
+            assertEquals(setOf(flockEdit, axonEdit), back.overrides.toSet()) // the duplicate MAC collapsed to one
+            // Detected positions unchanged on every row that carried the edit.
+            back.sessions.flatMap { it.devices }.filter { it.macAddress == flock1.macAddress }.forEach {
+                assertEquals(flock1.latitude!!, it.latitude!!, 1e-6)
+            }
+            // Filtering out a category also drops that device's edit.
+            val flockOnly = back.filtered(setOf(DeviceCategory.FLOCK_ALPR))
+            assertEquals(listOf(flockEdit), flockOnly.overrides)
+        }
+    }
+
+    @Test
     fun `file name is timestamped`() {
         assertEquals("birdwatch_backup_19700101T000000Z.json", BackupWriter.fileName(ExportFormat.JSON, 0L))
     }

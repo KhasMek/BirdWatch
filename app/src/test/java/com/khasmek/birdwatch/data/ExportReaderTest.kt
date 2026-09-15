@@ -6,8 +6,10 @@ import com.khasmek.birdwatch.detection.DetectionMethod
 import com.khasmek.birdwatch.detection.DetectionSource
 import com.khasmek.birdwatch.detection.DeviceType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ExportReaderTest {
@@ -77,6 +79,45 @@ class ExportReaderTest {
     fun `csv records tokenizer handles CRLF, blank lines and a missing trailing newline`() {
         val records = ExportReader.parseCsvRecords("a,b\r\n\r\n\"x\r\ny\",\"q\"\"q\"\n\nlast,row")
         assertEquals(listOf(listOf("a", "b"), listOf("x\r\ny", "q\"q"), listOf("last", "row")), records)
+    }
+
+    @Test
+    fun `user edits travel in json and csv and the detected position comes back intact`() {
+        val moved = DeviceOverride(flock.macAddress, latitude = 37.2, longitude = -122.9, alias = "Cam at Main & 3rd", hidden = false, updatedAt = 1_789_073_000_000L)
+        val hiddenOnly = DeviceOverride(raven.macAddress, hidden = true, updatedAt = 1_789_073_500_000L)
+        val overrides = mapOf(moved.macAddress to moved, hiddenOnly.macAddress to hiddenOnly)
+
+        for (text in listOf(ExportWriter.json(session, all, 0L, overrides), ExportWriter.csv(all, overrides))) {
+            val back = ExportReader.parse(text)
+            // Rows keep the detected fix; the correction is separate, as in the database.
+            val f = back.devices.first { it.macAddress == flock.macAddress }
+            assertEquals(flock.latitude!!, f.latitude!!, 1e-6)
+            assertEquals(flock.longitude!!, f.longitude!!, 1e-6)
+            val byMac = back.overrides.associateBy { it.macAddress }
+            assertEquals(2, byMac.size)
+            val m = byMac[moved.macAddress]!!
+            assertEquals(37.2, m.latitude!!, 1e-6); assertEquals(-122.9, m.longitude!!, 1e-6)
+            assertEquals("Cam at Main & 3rd", m.alias)
+            assertEquals(moved.updatedAt, m.updatedAt)
+            assertEquals(hiddenOnly, byMac[raven.macAddress])
+        }
+        // The file itself shows the corrected position and the alias, for anything else reading it.
+        val text = ExportWriter.json(session, listOf(flock), 0L, overrides)
+        assertTrue(text.contains("\"latitude\": 37.2"))
+        assertTrue(text.contains("\"alias\": \"Cam at Main & 3rd\""))
+        assertTrue(text.contains("\"detected_latitude\": 37.123456"))
+    }
+
+    @Test
+    fun `kml uses the alias and corrected position and drops hidden devices`() {
+        val moved = DeviceOverride(flock.macAddress, latitude = 37.2, longitude = -122.9, alias = "Cam A", updatedAt = 1L)
+        val hidden = DeviceOverride(raven.macAddress, hidden = true, updatedAt = 1L)
+        val ravenLocated = raven.copy(latitude = 37.0, longitude = -122.0)
+        val kml = ExportWriter.kml(session, listOf(flock, ravenLocated), mapOf(moved.macAddress to moved, hidden.macAddress to hidden))
+        assertTrue(kml.contains("<name>Flock: Cam A</name>"))
+        assertTrue(kml.contains("<coordinates>-122.900000,37.200000,0</coordinates>"))
+        assertTrue(kml.contains("Placemark position set by the user"))
+        assertFalse(kml.contains(ravenLocated.macAddress))
     }
 
     @Test

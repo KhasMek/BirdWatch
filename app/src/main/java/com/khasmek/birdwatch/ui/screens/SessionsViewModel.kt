@@ -132,7 +132,8 @@ class SessionsViewModel(private val container: AppContainer, private val savedSt
         val (text, name) = readDocument(uri)
         val parsed = withContext(Dispatchers.Default) { ExportReader.parse(text, name) }
         val r = sessionManager.importExported(parsed)
-        "Imported ${plural(r.devices.size, "device")} from ${r.format.label}"
+        "Imported ${plural(r.devices.size, "device")} from ${r.format.label}" +
+            (if (r.overrides.isNotEmpty()) " with ${plural(r.overrides.size, "edit")}" else "")
     }
 
     // ---- backup / restore ---------------------------------------------------
@@ -202,7 +203,8 @@ class SessionsViewModel(private val container: AppContainer, private val savedSt
         runBusy("Restore failed") {
             val r = backupManager.restore(parsed, categories)
             "Restored: ${plural(r.sessionsAdded, "new session")}, ${plural(r.sessionsMerged, "merged")}, " +
-                "${plural(r.devicesAdded, "device")} added, ${r.devicesUpdated} updated"
+                "${plural(r.devicesAdded, "device")} added, ${r.devicesUpdated} updated" +
+                (if (r.editsApplied > 0) ", ${plural(r.editsApplied, "edit")} applied" else "")
         }
     }
 

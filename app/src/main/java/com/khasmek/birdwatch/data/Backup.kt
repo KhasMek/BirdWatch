@@ -13,19 +13,34 @@ import kotlinx.serialization.json.put
 /** One session with its (possibly category-filtered) devices, the unit of a backup. */
 data class SessionBundle(val session: ScanSession, val devices: List<DetectedDevice>)
 
-/** Everything read from a backup file, ready for the restore dialog. */
-data class ParsedBackup(val sessions: List<SessionBundle>, val format: ExportFormat) {
+/**
+ * Everything read from a backup file, ready for the restore dialog. [overrides] are the user's
+ * per-device edits the file carried (one per MAC, the most recently updated wins).
+ */
+data class ParsedBackup(
+    val sessions: List<SessionBundle>,
+    val format: ExportFormat,
+    val overrides: List<DeviceOverride> = emptyList(),
+) {
     val deviceCount: Int get() = sessions.sumOf { it.devices.size }
 
     /** Categories present and how many devices each has, for the restore picker. */
     val categoryCounts: Map<DeviceCategory, Int>
         get() = sessions.flatMap { it.devices }.groupingBy { it.deviceType.category }.eachCount()
 
-    /** Keep only [categories]; sessions left empty are dropped. */
-    fun filtered(categories: Set<DeviceCategory>): ParsedBackup = copy(
-        sessions = sessions.map { b -> b.copy(devices = b.devices.filter { it.deviceType.category in categories }) }
+    /** Keep only [categories]; sessions left empty are dropped, as are edits for devices no longer included. */
+    fun filtered(categories: Set<DeviceCategory>): ParsedBackup {
+        val kept = sessions.map { b -> b.copy(devices = b.devices.filter { it.deviceType.category in categories }) }
             .filter { it.devices.isNotEmpty() }
-    )
+        val macs = kept.flatMap { b -> b.devices.map { it.macAddress } }.toSet()
+        return copy(sessions = kept, overrides = overrides.filter { it.macAddress in macs })
+    }
+
+    companion object {
+        /** One override per MAC; when a MAC appears in several sessions the newest edit wins. */
+        fun mergeOverrides(all: List<DeviceOverride>): List<DeviceOverride> =
+            all.groupBy { it.macAddress }.values.map { group -> group.maxBy { it.updatedAt } }
+    }
 }
 
 /**
@@ -41,14 +56,19 @@ object BackupWriter {
     fun fileName(format: ExportFormat, exportedAt: Long): String =
         "birdwatch_backup_${ExportWriter.isoCompact(exportedAt)}.${format.extension}"
 
-    fun write(format: ExportFormat, bundles: List<SessionBundle>, categories: Set<DeviceCategory>, exportedAt: Long): String =
-        when (format) {
-            ExportFormat.JSON -> json(bundles, categories, exportedAt)
-            ExportFormat.CSV -> csv(bundles)
-            ExportFormat.KML -> kml(bundles, exportedAt)
-        }
+    fun write(
+        format: ExportFormat,
+        bundles: List<SessionBundle>,
+        categories: Set<DeviceCategory>,
+        exportedAt: Long,
+        overrides: Overrides = emptyMap(),
+    ): String = when (format) {
+        ExportFormat.JSON -> json(bundles, categories, exportedAt, overrides)
+        ExportFormat.CSV -> csv(bundles, overrides)
+        ExportFormat.KML -> kml(bundles, exportedAt, overrides)
+    }
 
-    fun json(bundles: List<SessionBundle>, categories: Set<DeviceCategory>, exportedAt: Long): String {
+    fun json(bundles: List<SessionBundle>, categories: Set<DeviceCategory>, exportedAt: Long, overrides: Overrides = emptyMap()): String {
         val root = buildJsonObject {
             put("app", "birdwatch")
             put("kind", KIND)
@@ -61,7 +81,7 @@ object BackupWriter {
                 bundles.forEach { b ->
                     add(buildJsonObject {
                         put("session", ExportWriter.sessionObject(b.session, b.devices.size))
-                        put("devices", buildJsonArray { b.devices.forEach { add(ExportWriter.deviceObject(it)) } })
+                        put("devices", buildJsonArray { b.devices.forEach { add(ExportWriter.deviceObject(it, overrides[it.macAddress])) } })
                     })
                 }
             })
@@ -69,9 +89,10 @@ object BackupWriter {
         return ExportWriter.json.encodeToString(JsonObject.serializer(), root)
     }
 
-    fun csv(bundles: List<SessionBundle>): String = ExportWriter.csv(bundles.flatMap { it.devices })
+    fun csv(bundles: List<SessionBundle>, overrides: Overrides = emptyMap()): String =
+        ExportWriter.csv(bundles.flatMap { it.devices }, overrides)
 
-    fun kml(bundles: List<SessionBundle>, exportedAt: Long): String = buildString {
+    fun kml(bundles: List<SessionBundle>, exportedAt: Long, overrides: Overrides = emptyMap()): String = buildString {
         appendLine(ExportWriter.KML_HEAD)
         appendLine("<Document>")
         appendLine("  <name>${ExportWriter.xml("BirdWatch backup " + ExportWriter.isoCompact(exportedAt))}</name>")
@@ -80,7 +101,7 @@ object BackupWriter {
         bundles.forEach { b ->
             appendLine("  <Folder>")
             appendLine("    <name>${ExportWriter.xml(b.session.label ?: ("Session " + ExportWriter.isoCompact(b.session.startedAt)))}</name>")
-            ExportWriter.appendKmlPlacemarks(this, b.devices, indent = "    ")
+            ExportWriter.appendKmlPlacemarks(this, b.devices, indent = "    ", overrides = overrides)
             appendLine("  </Folder>")
         }
         appendLine("</Document>")
@@ -113,17 +134,20 @@ object BackupReader {
         if (kind != BackupWriter.KIND) {
             // A single-session export: wrap it.
             val single = ExportReader.parseJson(text)
-            return ParsedBackup(listOf(SessionBundle(single.session, single.devices)), ExportFormat.JSON)
+            return ParsedBackup(listOf(SessionBundle(single.session, single.devices)), ExportFormat.JSON, single.overrides)
         }
         val entries = root["sessions"] as? JsonArray ?: throw ImportFormatException("Backup has no \"sessions\" array")
-        val bundles = entries.mapIndexed { i, el ->
+        val parsedAll = entries.mapIndexed { i, el ->
             val obj = el as? JsonObject ?: throw ImportFormatException("Backup session #${i + 1} is malformed")
             if (obj["session"] !is JsonObject) throw ImportFormatException("Backup session #${i + 1} has no session object")
             // Each entry is exactly an export document minus the outer header, so reuse that parser.
-            val parsed = ExportReader.parseJson(obj)
-            SessionBundle(parsed.session, parsed.devices)
+            ExportReader.parseJson(obj)
         }
-        return ParsedBackup(bundles, ExportFormat.JSON)
+        return ParsedBackup(
+            parsedAll.map { SessionBundle(it.session, it.devices) },
+            ExportFormat.JSON,
+            ParsedBackup.mergeOverrides(parsedAll.flatMap { it.overrides }),
+        )
     }
 
     /** CSV rows may span several sessions; each session is reconstructed from its rows. */
@@ -135,11 +159,12 @@ object BackupReader {
         if (sid < 0) throw ImportFormatException("CSV is missing the \"session_id\" column; not a BirdWatch export")
         val bySession = records.drop(1).groupBy { it.getOrNull(sid).orEmpty() }
         if (bySession.keys.any { it.isEmpty() }) throw ImportFormatException("A CSV row has no session_id")
-        val bundles = bySession.map { (_, rows) ->
-            val single = ExportReader.parseCsvRows(header, rows)
-            SessionBundle(single.session, single.devices)
-        }
-        return ParsedBackup(bundles, ExportFormat.CSV)
+        val parsedAll = bySession.map { (_, rows) -> ExportReader.parseCsvRows(header, rows) }
+        return ParsedBackup(
+            parsedAll.map { SessionBundle(it.session, it.devices) },
+            ExportFormat.CSV,
+            ParsedBackup.mergeOverrides(parsedAll.flatMap { it.overrides }),
+        )
     }
 }
 

@@ -18,24 +18,41 @@ enum class ExportFormat(val extension: String, val mimeType: String, val label: 
     KML("kml", "application/vnd.google-earth.kml+xml", "KML (Google Earth)"),
 }
 
+/** Per-MAC user edits to apply while exporting, keyed by normalised MAC. */
+typealias Overrides = Map<String, DeviceOverride>
+
 /**
  * Pure serialisers for a session's detections. No Android dependencies; JVM-tested.
  * Field names follow the upstream Flask dashboard exports where they overlap
  * (`mac_address`, `detection_method`, `detection_tier`, `rssi`, `latitude`, `longitude`).
  *
- * The per-device pieces ([deviceObject], [csvRow], [kmlPlacemarks]) are shared with
+ * User edits ([DeviceOverride]) are applied on the way out: `latitude`/`longitude` are the
+ * corrected position when the user moved the pin (the detected one travels alongside as
+ * `detected_latitude`/`detected_longitude`), and `alias` is added when set, so anything that
+ * reads the file sees the map as the user sees it. [ExportReader] undoes this on import.
+ *
+ * The per-device pieces ([deviceObject], [csvRow], [appendKmlPlacemarks]) are shared with
  * [BackupWriter], so a backup is exactly "several sessions in the export format".
  */
 object ExportWriter {
 
     internal val json = Json { prettyPrint = true }
 
-    fun write(format: ExportFormat, session: ScanSession, devices: List<DetectedDevice>, exportedAt: Long = System.currentTimeMillis()): String =
-        when (format) {
-            ExportFormat.JSON -> json(session, devices, exportedAt)
-            ExportFormat.CSV -> csv(devices)
-            ExportFormat.KML -> kml(session, devices)
-        }
+    fun write(
+        format: ExportFormat,
+        session: ScanSession,
+        devices: List<DetectedDevice>,
+        exportedAt: Long = System.currentTimeMillis(),
+        overrides: Overrides = emptyMap(),
+    ): String = when (format) {
+        ExportFormat.JSON -> json(session, devices, exportedAt, overrides)
+        ExportFormat.CSV -> csv(devices, overrides)
+        ExportFormat.KML -> kml(session, devices, overrides)
+    }
+
+    /** The position a consumer should use: the user's correction if there is one, else the detected fix. */
+    fun effectiveLatitude(d: DetectedDevice, o: DeviceOverride?): Double? = if (o?.hasLocation == true) o.latitude else d.latitude
+    fun effectiveLongitude(d: DetectedDevice, o: DeviceOverride?): Double? = if (o?.hasLocation == true) o.longitude else d.longitude
 
     fun fileName(format: ExportFormat, session: ScanSession): String =
         "birdwatch_${isoCompact(session.startedAt)}_${session.id.take(8)}.${format.extension}"
@@ -44,12 +61,12 @@ object ExportWriter {
     // JSON
     // ------------------------------------------------------------------
 
-    fun json(session: ScanSession, devices: List<DetectedDevice>, exportedAt: Long): String {
+    fun json(session: ScanSession, devices: List<DetectedDevice>, exportedAt: Long, overrides: Overrides = emptyMap()): String {
         val root = buildJsonObject {
             put("app", "birdwatch")
             put("exported_at", iso(exportedAt))
             put("session", sessionObject(session, devices.size))
-            put("devices", buildJsonArray { devices.forEach { add(deviceObject(it)) } })
+            put("devices", buildJsonArray { devices.forEach { add(deviceObject(it, overrides[it.macAddress])) } })
         }
         return json.encodeToString(JsonObject.serializer(), root)
     }
@@ -62,9 +79,10 @@ object ExportWriter {
         put("device_count", deviceCount)
     }
 
-    fun deviceObject(d: DetectedDevice): JsonObject = buildJsonObject {
+    fun deviceObject(d: DetectedDevice, o: DeviceOverride? = null): JsonObject = buildJsonObject {
         put("mac_address", d.macAddress)
         put("device_name", d.deviceName?.let { JsonPrimitive(it) } ?: JsonNull)
+        o?.alias?.takeIf { it.isNotBlank() }?.let { put("alias", it) }
         put("source", d.source.name)
         put("detection_method", d.detectionMethod.wireName)
         put("device_type", d.deviceType.name)
@@ -75,12 +93,21 @@ object ExportWriter {
         put("detection_tier", d.tier?.let { JsonPrimitive(it) } ?: JsonNull)
         put("channel", d.channel?.let { JsonPrimitive(it) } ?: JsonNull)
         put("rssi", d.rssi)
-        put("latitude", d.latitude?.let { JsonPrimitive(it) } ?: JsonNull)
-        put("longitude", d.longitude?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("latitude", effectiveLatitude(d, o)?.let { JsonPrimitive(it) } ?: JsonNull)
+        put("longitude", effectiveLongitude(d, o)?.let { JsonPrimitive(it) } ?: JsonNull)
         put("gps_accuracy_m", d.accuracyMeters?.let { JsonPrimitive(it) } ?: JsonNull)
         put("first_seen", iso(d.firstSeen))
         put("last_seen", iso(d.lastSeen))
         put("sightings", d.sightings)
+        if (o != null && !o.isEmpty) {
+            put("user_edit", buildJsonObject {
+                put("position_edited", o.hasLocation)
+                put("detected_latitude", d.latitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                put("detected_longitude", d.longitude?.let { JsonPrimitive(it) } ?: JsonNull)
+                put("hidden", o.hidden)
+                put("updated_at", if (o.updatedAt > 0) JsonPrimitive(iso(o.updatedAt)) else JsonNull)
+            })
+        }
         if (d.isRemoteId) {
             put("remote_id", buildJsonObject {
                 put("uas_id", d.uasId?.let { JsonPrimitive(it) } ?: JsonNull)
@@ -104,38 +131,47 @@ object ExportWriter {
         "latitude", "longitude", "gps_accuracy_m", "first_seen", "last_seen", "sightings",
         "uas_id", "operator_id", "target_latitude", "target_longitude", "target_altitude_m",
         "operator_latitude", "operator_longitude",
+        // user edits (v4): alias, whether latitude/longitude above is the user's correction, the
+        // detected fix when it is, hidden flag, when the edit was made
+        "alias", "position_edited", "detected_latitude", "detected_longitude", "hidden", "edited_at",
     )
 
-    fun csv(devices: List<DetectedDevice>): String = buildString {
+    fun csv(devices: List<DetectedDevice>, overrides: Overrides = emptyMap()): String = buildString {
         appendLine(CSV_HEADER.joinToString(","))
-        devices.forEach { appendLine(csvRow(it)) }
+        devices.forEach { appendLine(csvRow(it, overrides[it.macAddress])) }
     }
 
-    fun csvRow(d: DetectedDevice): String = listOf(
+    fun csvRow(d: DetectedDevice, o: DeviceOverride? = null): String = listOf(
         d.sessionId, d.macAddress, d.deviceName ?: "", d.source.name, d.detectionMethod.wireName,
         d.deviceType.name, d.deviceType.category.name, d.confidence.name, d.matchedOn, d.ravenFirmware ?: "",
         d.tier?.toString() ?: "", d.channel?.toString() ?: "", d.rssi.toString(),
-        d.latitude?.let { fmt(it) } ?: "", d.longitude?.let { fmt(it) } ?: "",
+        effectiveLatitude(d, o)?.let { fmt(it) } ?: "", effectiveLongitude(d, o)?.let { fmt(it) } ?: "",
         d.accuracyMeters?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "",
         iso(d.firstSeen), iso(d.lastSeen), d.sightings.toString(),
         d.uasId ?: "", d.operatorId ?: "",
         d.targetLatitude?.let { fmt(it) } ?: "", d.targetLongitude?.let { fmt(it) } ?: "",
         d.targetAltitudeM?.let { String.format(Locale.ROOT, "%.1f", it) } ?: "",
         d.operatorLatitude?.let { fmt(it) } ?: "", d.operatorLongitude?.let { fmt(it) } ?: "",
+        o?.alias ?: "",
+        if (o?.hasLocation == true) "true" else "",
+        if (o?.hasLocation == true) d.latitude?.let { fmt(it) } ?: "" else "",
+        if (o?.hasLocation == true) d.longitude?.let { fmt(it) } ?: "" else "",
+        if (o?.hidden == true) "true" else "",
+        if (o != null && !o.isEmpty && o.updatedAt > 0) iso(o.updatedAt) else "",
     ).joinToString(",") { csvCell(it) }
 
     // ------------------------------------------------------------------
     // KML
     // ------------------------------------------------------------------
 
-    fun kml(session: ScanSession, devices: List<DetectedDevice>): String = buildString {
-        val located = devices.filter { it.hasLocation || it.hasTargetLocation }
+    fun kml(session: ScanSession, devices: List<DetectedDevice>, overrides: Overrides = emptyMap()): String = buildString {
+        val located = devices.filter { it.hasLocation || it.hasTargetLocation || overrides[it.macAddress]?.hasLocation == true }
         appendLine(KML_HEAD)
         appendLine("<Document>")
         appendLine("  <name>${xml("BirdWatch session " + isoCompact(session.startedAt))}</name>")
         appendLine("  <description>${xml("${devices.size} devices, ${located.size} with GPS. Session ${session.id}")}</description>")
         appendKmlStyles(this)
-        appendKmlPlacemarks(this, devices, indent = "  ")
+        appendKmlPlacemarks(this, devices, indent = "  ", overrides = overrides)
         appendLine("</Document>")
         appendLine("</kml>")
     }
@@ -158,15 +194,22 @@ object ExportWriter {
         sb.appendLine("""  <Style id="operator-link"><LineStyle><color>b37a6e54</color><width>3</width></LineStyle></Style>""")
     }
 
-    /** Placemarks for every located device (drones at their reported position) plus operator markers and links. */
-    fun appendKmlPlacemarks(sb: StringBuilder, devices: List<DetectedDevice>, indent: String) {
-        val located = devices.filter { it.hasLocation || it.hasTargetLocation }
+    /**
+     * Placemarks for every located device (drones at their reported position, user-moved pins at
+     * the corrected one) plus operator markers and links. Devices the user hid are left out.
+     */
+    fun appendKmlPlacemarks(sb: StringBuilder, devices: List<DetectedDevice>, indent: String, overrides: Overrides = emptyMap()) {
+        val shown = devices.filter { overrides[it.macAddress]?.hidden != true }
+        val located = shown.filter { it.hasLocation || it.hasTargetLocation || overrides[it.macAddress]?.hasLocation == true }
         located.forEach { d ->
+            val o = overrides[d.macAddress]
+            val alias = o?.alias?.takeIf { it.isNotBlank() }
             sb.appendLine("$indent<Placemark>")
-            sb.appendLine("$indent  <name>${xml("${d.deviceType.label}: ${d.displayName}")}</name>")
+            sb.appendLine("$indent  <name>${xml("${d.deviceType.label}: ${alias ?: d.displayName}")}</name>")
             sb.appendLine("$indent  <styleUrl>#${kmlStyleId(d.deviceType.category)}</styleUrl>")
             sb.appendLine("$indent  <TimeStamp><when>${iso(d.lastSeen)}</when></TimeStamp>")
             sb.appendLine("$indent  <description><![CDATA[")
+            if (alias != null) sb.appendLine("$indent    <b>Detected name:</b> ${xml(d.displayName)}<br/>")
             sb.appendLine("$indent    <b>MAC:</b> ${d.macAddress}<br/>")
             sb.appendLine("$indent    <b>Category:</b> ${d.deviceType.category.label}<br/>")
             sb.appendLine("$indent    <b>Source:</b> ${d.source.label}<br/>")
@@ -186,16 +229,23 @@ object ExportWriter {
                 if (d.hasOperatorLocation) sb.appendLine("$indent    <b>Operator position:</b> ${fmt(d.operatorLatitude!!)}, ${fmt(d.operatorLongitude!!)}<br/>")
                 if (d.hasTargetLocation) sb.appendLine("$indent    <i>Placemark is the drone's self-reported position.</i><br/>")
             }
+            if (o?.hasLocation == true) {
+                sb.appendLine("$indent    <i>Placemark position set by the user.</i>" +
+                    (if (d.hasLocation) " Detected at ${fmt(d.latitude!!)}, ${fmt(d.longitude!!)}." else "") + "<br/>")
+            }
             sb.appendLine("$indent  ]]></description>")
-            if (d.hasTargetLocation) {
-                sb.appendLine("$indent  <Point><altitudeMode>absolute</altitudeMode><coordinates>${fmt(d.targetLongitude!!)},${fmt(d.targetLatitude!!)},${String.format(Locale.ROOT, "%.0f", d.targetAltitudeM ?: 0.0)}</coordinates></Point>")
-            } else {
-                sb.appendLine("$indent  <Point><coordinates>${fmt(d.longitude!!)},${fmt(d.latitude!!)},0</coordinates></Point>")
+            when {
+                o?.hasLocation == true ->
+                    sb.appendLine("$indent  <Point><coordinates>${fmt(o.longitude!!)},${fmt(o.latitude!!)},0</coordinates></Point>")
+                d.hasTargetLocation ->
+                    sb.appendLine("$indent  <Point><altitudeMode>absolute</altitudeMode><coordinates>${fmt(d.targetLongitude!!)},${fmt(d.targetLatitude!!)},${String.format(Locale.ROOT, "%.0f", d.targetAltitudeM ?: 0.0)}</coordinates></Point>")
+                else ->
+                    sb.appendLine("$indent  <Point><coordinates>${fmt(d.longitude!!)},${fmt(d.latitude!!)},0</coordinates></Point>")
             }
             sb.appendLine("$indent</Placemark>")
         }
         // Remote ID operators: their own placemark plus a line back to the aircraft.
-        devices.filter { it.hasOperatorLocation }.forEach { d ->
+        shown.filter { it.hasOperatorLocation }.forEach { d ->
             val label = xml(d.uasId ?: d.displayName)
             sb.appendLine("$indent<Placemark>")
             sb.appendLine("$indent  <name>Operator: $label</name>")

@@ -204,11 +204,23 @@ scan, so results refresh every 15 to 30 seconds. On a rooted phone,
 **Map.** Needs your own Google Maps API key; see [step 4](#4-optional-a-google-maps-api-key-for-the-map-tab)
 above for creating one and locking it to this app. Markers are coloured by category. Remote ID drones appear at their self-reported
 position with a second marker for the operator and a dashed line between them. Switch between
-the current session and all sessions with the chips above the map.
+the current session and all sessions with the chips above the map, and switch whole categories
+on or off with the second row of chips. In *All sessions* a device is one pin no matter how many
+times you drove past it.
+
+**Editing a device.** Tap a pin for its details and the edit buttons. *Move pin* puts a crosshair
+over the map: pan until it sits on the device (or tap *My location* if you're standing next to
+it) and save; every session that saw the device now draws it there, and the detected position
+is kept too. *Set alias* gives it a name of your own, shown above the detected name and MAC on
+every screen. *Hide* drops the pin but keeps the data; the "hidden by you" button above the map
+brings it back. *Delete* removes the detection itself. Move and alias are only offered for
+devices with a fixed address; smart glasses and Remote ID drones rotate theirs.
 
 **Sessions and export.** Every scan is a session. The Sessions tab lists them with counts; tap
 one for its detections, share it as JSON, CSV or KML through the Android share sheet, or delete
-it. The export icon on the dashboard shares the session that's running right now.
+it. The export icon on the dashboard shares the session that's running right now. Exports use
+the corrected position and alias when you've set them (the detected position rides along as
+`detected_latitude`/`detected_longitude`), and hidden devices are left out of KML.
 
 **Restoring an export.** *Import session…* in the Sessions menu (the ⋮ button) imports a JSON or
 CSV file that BirdWatch exported earlier, on this phone or another one, as a session with its
@@ -223,6 +235,8 @@ times; KML is for Google Earth only. Restore reads a JSON or CSV backup, shows w
 you leave categories out, and *merges*: sessions you already have keep everything and gain any
 missing detections, sessions you don't have are added. A detection present in both keeps its most
 recent record and higher sighting count, so restoring an old backup never rolls anything back.
+Your pin corrections, aliases and hidden flags travel with the backup and are restored unless
+you've made a newer edit on the phone since.
 *Delete all data…* wipes every session and detection after confirmation; settings and your Maps
 key stay.
 

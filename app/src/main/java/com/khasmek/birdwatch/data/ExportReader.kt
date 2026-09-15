@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
@@ -18,8 +19,17 @@ import kotlinx.serialization.json.intOrNull
 import java.time.Instant
 import java.time.format.DateTimeParseException
 
-/** A session reconstructed from one of BirdWatch's own export files. */
-data class ImportedSession(val session: ScanSession, val devices: List<DetectedDevice>, val format: ExportFormat)
+/**
+ * A session reconstructed from one of BirdWatch's own export files, plus any per-device edits
+ * (alias, moved pin, hidden) the file carried. Devices hold the *detected* positions; the
+ * corrections live in [overrides], exactly as in the database.
+ */
+data class ImportedSession(
+    val session: ScanSession,
+    val devices: List<DetectedDevice>,
+    val format: ExportFormat,
+    val overrides: List<DeviceOverride> = emptyList(),
+)
 
 class ImportFormatException(message: String) : Exception(message)
 
@@ -63,14 +73,34 @@ object ExportReader {
         val label = sessionObj.str("label")
         val devicesArr = root["devices"] as? JsonArray ?: JsonArray(emptyList())
 
+        val overrides = mutableListOf<DeviceOverride>()
         val devices = devicesArr.mapIndexedNotNull { i, el ->
             val d = el as? JsonObject ?: return@mapIndexedNotNull null
             val mac = d.str("mac_address")?.takeIf { it.isNotBlank() }
                 ?: throw ImportFormatException("Device #${i + 1} has no mac_address")
             val rid = d["remote_id"] as? JsonObject
+            val normalizedMac = DetectionTable.normalizeMac(mac)
+
+            // User edits: the file's latitude/longitude are the corrected position when
+            // position_edited; the detected fix is under user_edit. Undo that here.
+            val edit = d["user_edit"] as? JsonObject
+            val positionEdited = edit?.let { (it["position_edited"] as? JsonPrimitive)?.booleanOrNull } == true
+            val alias = d.str("alias")
+            val detectedLat = if (positionEdited) edit?.dbl("detected_latitude") else d.dbl("latitude")
+            val detectedLon = if (positionEdited) edit?.dbl("detected_longitude") else d.dbl("longitude")
+            val override = DeviceOverride(
+                macAddress = normalizedMac,
+                latitude = if (positionEdited) d.dbl("latitude") else null,
+                longitude = if (positionEdited) d.dbl("longitude") else null,
+                alias = alias,
+                hidden = edit?.let { (it["hidden"] as? JsonPrimitive)?.booleanOrNull } == true,
+                updatedAt = edit?.str("updated_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
+            )
+            if (!override.isEmpty) overrides += override
+
             DetectedDevice(
                 sessionId = id,
-                macAddress = DetectionTable.normalizeMac(mac),
+                macAddress = normalizedMac,
                 source = enumOr(d.str("source"), DetectionSource.BLE),
                 deviceName = d.str("device_name"),
                 detectionMethod = DetectionMethod.fromWireName(d.str("detection_method")),
@@ -81,8 +111,8 @@ object ExportReader {
                 tier = d.int("detection_tier"),
                 channel = d.int("channel"),
                 rssi = d.int("rssi") ?: 0,
-                latitude = d.dbl("latitude"),
-                longitude = d.dbl("longitude"),
+                latitude = detectedLat,
+                longitude = detectedLon,
                 accuracyMeters = d.flt("gps_accuracy_m"),
                 firstSeen = d.str("first_seen")?.let(::epoch) ?: startedAt,
                 lastSeen = d.str("last_seen")?.let(::epoch) ?: startedAt,
@@ -106,6 +136,7 @@ object ExportReader {
             ),
             devices = devices,
             format = ExportFormat.JSON,
+            overrides = overrides.distinctBy { it.macAddress },
         )
     }
 
@@ -128,11 +159,27 @@ object ExportReader {
         if (sessionIds.size != 1) throw ImportFormatException("CSV must contain exactly one session (found ${sessionIds.size})")
         val id = sessionIds.single()
 
+        val overrides = mutableListOf<DeviceOverride>()
         val devices = rows.mapIndexed { i, c ->
             val mac = row(c, "mac_address") ?: throw ImportFormatException("Row ${i + 2} has no mac_address")
+            val normalizedMac = DetectionTable.normalizeMac(mac)
+
+            // User edits (see ExportWriter.CSV_HEADER): latitude/longitude are the correction when
+            // position_edited is set, and the detected fix is in detected_*.
+            val positionEdited = row(c, "position_edited").equals("true", ignoreCase = true)
+            val override = DeviceOverride(
+                macAddress = normalizedMac,
+                latitude = if (positionEdited) row(c, "latitude")?.toDoubleOrNull() else null,
+                longitude = if (positionEdited) row(c, "longitude")?.toDoubleOrNull() else null,
+                alias = row(c, "alias"),
+                hidden = row(c, "hidden").equals("true", ignoreCase = true),
+                updatedAt = row(c, "edited_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
+            )
+            if (!override.isEmpty) overrides += override
+
             DetectedDevice(
                 sessionId = id,
-                macAddress = DetectionTable.normalizeMac(mac),
+                macAddress = normalizedMac,
                 source = enumOr(row(c, "source"), DetectionSource.BLE),
                 deviceName = row(c, "device_name"),
                 detectionMethod = DetectionMethod.fromWireName(row(c, "detection_method")),
@@ -143,8 +190,8 @@ object ExportReader {
                 tier = row(c, "detection_tier")?.toIntOrNull(),
                 channel = row(c, "channel")?.toIntOrNull(),
                 rssi = row(c, "rssi")?.toIntOrNull() ?: 0,
-                latitude = row(c, "latitude")?.toDoubleOrNull(),
-                longitude = row(c, "longitude")?.toDoubleOrNull(),
+                latitude = row(c, if (positionEdited) "detected_latitude" else "latitude")?.toDoubleOrNull(),
+                longitude = row(c, if (positionEdited) "detected_longitude" else "longitude")?.toDoubleOrNull(),
                 accuracyMeters = row(c, "gps_accuracy_m")?.toFloatOrNull(),
                 firstSeen = row(c, "first_seen")?.let(::epoch) ?: throw ImportFormatException("Row ${i + 2} has no first_seen"),
                 lastSeen = row(c, "last_seen")?.let(::epoch) ?: throw ImportFormatException("Row ${i + 2} has no last_seen"),
@@ -164,6 +211,7 @@ object ExportReader {
             session = ScanSession(id = id, startedAt = devices.minOf { it.firstSeen }, endedAt = devices.maxOf { it.lastSeen }),
             devices = devices,
             format = ExportFormat.CSV,
+            overrides = overrides.distinctBy { it.macAddress },
         )
     }
 

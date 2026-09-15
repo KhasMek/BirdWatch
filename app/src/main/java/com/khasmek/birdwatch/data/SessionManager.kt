@@ -238,11 +238,13 @@ class SessionManager(
     suspend fun importExported(parsed: ImportedSession): ImportedSession {
         if (sessionDao.getById(parsed.session.id) != null) throw AlreadyImportedException(parsed.session.id)
         val session = parsed.session.copy(label = parsed.session.label ?: "Imported (${parsed.format.label})")
+        var edits = 0
         db.withTransaction {
             sessionDao.insert(session)
             if (parsed.devices.isNotEmpty()) detectionDao.upsertAll(parsed.devices)
+            edits = BackupManager.applyOverrides(db, parsed.overrides)
         }
-        Log.i(TAG, "Imported session ${session.id} (${parsed.devices.size} devices) from ${parsed.format.label}")
+        Log.i(TAG, "Imported session ${session.id} (${parsed.devices.size} devices, $edits edits) from ${parsed.format.label}")
         return parsed.copy(session = session)
     }
 
