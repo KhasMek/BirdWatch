@@ -69,6 +69,8 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
+import com.khasmek.birdwatch.ui.components.AliasDialog
+import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
 import com.khasmek.birdwatch.ui.components.categoryIcon
 import com.khasmek.birdwatch.ui.components.coords
@@ -259,8 +261,11 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
         if (pin == null) {
             deleteMac = null
         } else {
-            DeleteDetectionDialog(
-                pin = pin,
+            DeleteDeviceDialog(
+                name = pin.alias ?: pin.latest.displayName,
+                macAddress = pin.macAddress,
+                rowCount = pin.rows.size,
+                sessionCount = pin.sessionCount,
                 sessionActive = state.sessionActive,
                 onDismiss = { deleteMac = null },
                 onConfirm = {
@@ -476,7 +481,7 @@ private fun PinSheet(
                 }
                 Spacer(Modifier.height(8.dp))
             }
-            DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true, alias = pin.alias)
+            DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true, override = pin.override)
 
             Spacer(Modifier.height(12.dp))
             Row(
@@ -522,61 +527,6 @@ private fun PinSheet(
             Spacer(Modifier.height(24.dp))
         }
     }
-}
-
-@Composable
-private fun AliasDialog(current: String?, detectedName: String, onDismiss: () -> Unit, onSave: (String?) -> Unit) {
-    var text by rememberSaveable { mutableStateOf(current.orEmpty()) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Alias") },
-        text = {
-            Column {
-                Text(
-                    "A name of your own for this device. The detected name ($detectedName) stays visible underneath.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    label = { Text("Alias") },
-                    placeholder = { Text("e.g. Camera at Main & 3rd") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
-        dismissButton = {
-            Row {
-                if (!current.isNullOrBlank()) TextButton(onClick = { onSave(null) }) { Text("Clear") }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
-        },
-    )
-}
-
-@Composable
-private fun DeleteDetectionDialog(pin: MapPin, sessionActive: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    val n = pin.rows.size
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Delete detection?") },
-        text = {
-            Text(
-                buildString {
-                    append("This removes ${pin.alias ?: pin.latest.displayName} (${pin.macAddress}) from ")
-                    append(if (n == 1) "this session." else "all ${pin.sessionCount} sessions shown ($n detections).")
-                    if (sessionActive) append(" If it is still in range it will be picked up again as a new detection.")
-                    append(" To keep the data but drop the pin, use Hide instead. This cannot be undone.")
-                }
-            )
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 @Composable

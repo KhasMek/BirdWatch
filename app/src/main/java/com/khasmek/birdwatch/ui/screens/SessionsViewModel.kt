@@ -12,6 +12,7 @@ import com.khasmek.birdwatch.AppContainer
 import com.khasmek.birdwatch.data.BackupPayload
 import com.khasmek.birdwatch.data.BackupReader
 import com.khasmek.birdwatch.data.BackupWriter
+import com.khasmek.birdwatch.data.DeviceOverride
 import com.khasmek.birdwatch.data.ExportFormat
 import com.khasmek.birdwatch.data.ExportReader
 import com.khasmek.birdwatch.data.ImportFormatException
@@ -282,14 +283,19 @@ data class SessionDetailUiState(
     val isActive: Boolean = false,
     /** True once the first query has returned, so a deleted/missing session can be told apart from "loading". */
     val loaded: Boolean = false,
-    /** User aliases by MAC (device_overrides). */
-    val aliases: Map<String, String> = emptyMap(),
+    /** The user's per-device edits by MAC (device_overrides). */
+    val overrides: Map<String, DeviceOverride> = emptyMap(),
 )
 
-/** One session: summary header + its devices. */
+/** One session: summary header + its devices, with the per-device edit actions. */
 class SessionDetailViewModel(private val container: AppContainer, private val sessionId: String) : ViewModel() {
 
     private val sessionManager = container.sessionManager
+    private val editor = container.deviceEditor
+
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    /** One-line outcomes of edits, for the screen to toast. */
+    val messages: Flow<String> = _messages.receiveAsFlow()
 
     val uiState: StateFlow<SessionDetailUiState> = combine(
         container.database.sessionDao().observeSummary(sessionId),
@@ -299,7 +305,7 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
     ) { summary, devices, active, overrides ->
         SessionDetailUiState(
             summary = summary, devices = devices, isActive = active, loaded = true,
-            aliases = overrides.mapNotNull { o -> o.alias?.takeIf { it.isNotBlank() }?.let { o.macAddress to it } }.toMap(),
+            overrides = overrides.associateBy { it.macAddress },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SessionDetailUiState())
 
@@ -307,5 +313,14 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
 
     fun delete() {
         viewModelScope.launch { sessionManager.deleteSession(sessionId) }
+    }
+
+    fun setAlias(mac: String, alias: String?) = edit { editor.setAlias(mac, alias) }
+    fun toggleHidden(mac: String) = edit { editor.setHidden(mac, uiState.value.overrides[mac]?.hidden != true) }
+    /** Remove the device from this session only. */
+    fun deleteDetection(mac: String) = edit { editor.deleteDetections(mac, listOf(sessionId)) }
+
+    private fun edit(block: suspend () -> String) {
+        viewModelScope.launch { _messages.send(block()) }
     }
 }

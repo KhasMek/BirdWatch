@@ -6,6 +6,7 @@ import com.khasmek.birdwatch.audio.AlertSounds
 import com.khasmek.birdwatch.data.AppSettings
 import com.khasmek.birdwatch.data.BackupManager
 import com.khasmek.birdwatch.data.DetectionDatabase
+import com.khasmek.birdwatch.data.DeviceEditor
 import com.khasmek.birdwatch.data.ExportManager
 import com.khasmek.birdwatch.data.SecureSettings
 import com.khasmek.birdwatch.data.SessionManager
@@ -44,6 +45,7 @@ class AppContainer(context: Context) {
     val alertSounds: AlertSounds by lazy { AlertSounds(appContext, settings) }
     val exportManager: ExportManager by lazy { ExportManager(appContext, database) }
     val backupManager: BackupManager by lazy { BackupManager(appContext, database) }
+    val deviceEditor: DeviceEditor by lazy { DeviceEditor(database, sessionManager) }
 }
 
 class BirdWatchApp : Application() {

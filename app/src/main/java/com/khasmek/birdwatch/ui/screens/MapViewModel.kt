@@ -1,6 +1,5 @@
 package com.khasmek.birdwatch.ui.screens
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
@@ -168,51 +167,20 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         _hidden.value = if (category in _hidden.value) _hidden.value - category else _hidden.value + category
     }
 
-    // ---- per-device edits --------------------------------------------------------------------
+    // ---- per-device edits (shared DeviceEditor; outcome goes to messages) ---------------------
+
+    private val editor = container.deviceEditor
 
     /** Pin the device at [point]; every session that saw this MAC now draws it there. */
-    fun setLocation(mac: String, point: GeoPoint) = edit(mac, "Pin moved") {
-        it.copy(latitude = point.latitude, longitude = point.longitude)
-    }
-
-    /** Back to the detected position. */
-    fun clearLocation(mac: String) = edit(mac, "Pin back at the detected position") {
-        it.copy(latitude = null, longitude = null)
-    }
-
-    fun setAlias(mac: String, alias: String?) {
-        val clean = alias?.trim()?.takeIf { it.isNotEmpty() }
-        edit(mac, if (clean == null) "Alias cleared" else "Alias set") { it.copy(alias = clean) }
-    }
-
-    fun setHidden(mac: String, hidden: Boolean) =
-        edit(mac, if (hidden) "Hidden from the map" else "Shown on the map again") { it.copy(hidden = hidden) }
+    fun setLocation(mac: String, point: GeoPoint) = run { editor.setLocation(mac, point.latitude, point.longitude) }
+    fun clearLocation(mac: String) = run { editor.clearLocation(mac) }
+    fun setAlias(mac: String, alias: String?) = run { editor.setAlias(mac, alias) }
+    fun setHidden(mac: String, hidden: Boolean) = run { editor.setHidden(mac, hidden) }
 
     /** Remove this device's rows from [sessionIds] (the sessions its pin currently covers). */
-    fun deleteDetections(mac: String, sessionIds: Collection<String>) {
-        viewModelScope.launch {
-            val n = runCatching { sessionManager.deleteDetections(mac, sessionIds) }
-                .onFailure { Log.e(TAG, "delete failed", it) }
-                .getOrDefault(0)
-            _messages.send(if (n == 0) "Nothing deleted" else "Deleted $n detection${if (n == 1) "" else "s"}")
-        }
-    }
+    fun deleteDetections(mac: String, sessionIds: Collection<String>) = run { editor.deleteDetections(mac, sessionIds) }
 
-    private fun edit(mac: String, done: String, change: (DeviceOverride) -> DeviceOverride) {
-        val key = DetectionTable.normalizeMac(mac)
-        viewModelScope.launch {
-            runCatching {
-                val current = overrideDao.get(key) ?: DeviceOverride(key)
-                val next = change(current).copy(updatedAt = System.currentTimeMillis())
-                if (next.isEmpty) overrideDao.delete(key) else overrideDao.upsert(next)
-            }.fold(
-                onSuccess = { _messages.send(done) },
-                onFailure = { Log.e(TAG, "edit failed", it); _messages.send("Couldn't save: ${it.message}") },
-            )
-        }
-    }
-
-    private companion object {
-        const val TAG = "BirdWatch/Map"
+    private fun run(block: suspend () -> String) {
+        viewModelScope.launch { _messages.send(block()) }
     }
 }

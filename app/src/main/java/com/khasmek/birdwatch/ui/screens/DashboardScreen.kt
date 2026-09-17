@@ -56,7 +56,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.R
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
+import com.khasmek.birdwatch.ui.components.AliasDialog
+import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
+import com.khasmek.birdwatch.ui.components.DeviceCardActions
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
 import com.khasmek.birdwatch.ui.components.StatsBar
 import com.khasmek.birdwatch.ui.components.categoryIcon
@@ -73,6 +76,36 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showExport by rememberSaveable { mutableStateOf(false) }
+    var aliasMac by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteMac by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) { viewModel.messages.collect { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() } }
+
+    aliasMac?.let { mac ->
+        val device = state.devices.firstOrNull { it.macAddress == mac }
+        AliasDialog(
+            current = state.overrides[mac]?.alias,
+            detectedName = device?.displayName ?: mac,
+            onDismiss = { aliasMac = null },
+            onSave = { viewModel.setAlias(mac, it); aliasMac = null },
+        )
+    }
+    deleteMac?.let { mac ->
+        val device = state.devices.firstOrNull { it.macAddress == mac }
+        if (device == null) {
+            deleteMac = null
+        } else {
+            DeleteDeviceDialog(
+                name = state.overrides[mac]?.alias ?: device.displayName,
+                macAddress = mac,
+                rowCount = 1,
+                sessionCount = 1,
+                sessionActive = true,
+                onDismiss = { deleteMac = null },
+                onConfirm = { viewModel.deleteDetection(mac); deleteMac = null },
+            )
+        }
+    }
 
     if (showExport) {
         ExportFormatDialog(
@@ -194,7 +227,16 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(state.visibleDevices, key = { it.macAddress }) { device ->
-                        DeviceCard(device = device, now = now, alias = state.aliases[device.macAddress])
+                        DeviceCard(
+                            device = device,
+                            now = now,
+                            override = state.overrides[device.macAddress],
+                            actions = DeviceCardActions(
+                                onAlias = { aliasMac = device.macAddress },
+                                onToggleHidden = { viewModel.toggleHidden(device.macAddress) },
+                                onDelete = { deleteMac = device.macAddress },
+                            ),
+                        )
                     }
                 }
             }

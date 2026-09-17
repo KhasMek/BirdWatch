@@ -3,6 +3,7 @@ package com.khasmek.birdwatch.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,9 +13,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.LocalPolice
@@ -24,12 +28,16 @@ import androidx.compose.material.icons.filled.SignalCellularAlt1Bar
 import androidx.compose.material.icons.filled.SignalCellularAlt2Bar
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -44,6 +52,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.khasmek.birdwatch.data.DeviceOverride
 import com.khasmek.birdwatch.detection.Confidence
 import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DetectionSource
@@ -53,9 +62,17 @@ import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
 import java.util.Locale
 
+/** Edit actions a card can offer in its expanded state. Any null callback hides that button. */
+data class DeviceCardActions(
+    val onAlias: (() -> Unit)? = null,
+    val onToggleHidden: (() -> Unit)? = null,
+    val onDelete: (() -> Unit)? = null,
+)
+
 /**
  * One detected device. Collapsed: type badge, name/MAC, method tag, RSSI bars, last seen.
- * Tap to expand: GPS, first/last seen clock times, sightings, matched value, tier/channel/firmware.
+ * Tap to expand: GPS, first/last seen clock times, sightings, matched value, tier/channel/firmware,
+ * and, when [actions] is given, the edit buttons.
  */
 @Composable
 fun DeviceCard(
@@ -63,11 +80,13 @@ fun DeviceCard(
     now: Long,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
-    /** User-chosen name (device_overrides); shown as the title with the detected name beneath. */
-    alias: String? = null,
+    /** The user's edits for this MAC (alias shown as the title, hidden / moved shown as tags). */
+    override: DeviceOverride? = null,
+    actions: DeviceCardActions? = null,
 ) {
     var expanded by rememberSaveable(device.macAddress) { mutableStateOf(initiallyExpanded) }
     val typeColor = DetectionColors.forType(device.deviceType)
+    val alias = override?.alias?.takeIf { it.isNotBlank() }
 
     Card(
         modifier = modifier
@@ -81,7 +100,7 @@ fun DeviceCard(
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        text = alias?.takeIf { it.isNotBlank() } ?: device.displayName,
+                        text = alias ?: device.displayName,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -89,7 +108,7 @@ fun DeviceCard(
                     )
                     Text(
                         // With an alias the detected name is still evidence; keep it in view.
-                        text = if (alias.isNullOrBlank() || device.displayName == "Unknown") device.macAddress
+                        text = if (alias == null || device.displayName == "Unknown") device.macAddress
                         else "${device.displayName} · ${device.macAddress}",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
@@ -115,6 +134,10 @@ fun DeviceCard(
                     Tag(text = "low conf.", color = MaterialTheme.colorScheme.errorContainer,
                         onColor = MaterialTheme.colorScheme.onErrorContainer)
                 }
+                if (override?.hidden == true) {
+                    Tag(text = "hidden on map", color = MaterialTheme.colorScheme.surfaceVariant,
+                        onColor = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = TimeFormat.relative(device.lastSeen, now),
@@ -132,6 +155,9 @@ fun DeviceCard(
                         coords(device.latitude!!, device.longitude!!) +
                             (device.accuracyMeters?.let { " (±${it.toInt()} m)" } ?: "")
                     } else "No GPS fix at detection")
+                    if (override?.hasLocation == true) {
+                        DetailRow("Pin placed at", coords(override.latitude!!, override.longitude!!))
+                    }
                     DetailRow("First seen", TimeFormat.clock(device.firstSeen))
                     DetailRow("Last seen", TimeFormat.clock(device.lastSeen))
                     DetailRow("Sightings", device.sightings.toString())
@@ -151,6 +177,39 @@ fun DeviceCard(
                         }
                         if (device.hasOperatorLocation) {
                             DetailRow("Operator", coords(device.operatorLatitude!!, device.operatorLongitude!!))
+                        }
+                    }
+                    if (actions != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            // Alias only where the MAC names one physical thing (not glasses / Remote ID).
+                            if (actions.onAlias != null && device.hasStableIdentity) {
+                                OutlinedButton(onClick = actions.onAlias, contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(if (alias == null) "Set alias" else "Edit alias")
+                                }
+                            }
+                            if (actions.onToggleHidden != null) {
+                                val hidden = override?.hidden == true
+                                OutlinedButton(onClick = actions.onToggleHidden, contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                                    Icon(if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(if (hidden) "Show on map" else "Hide on map")
+                                }
+                            }
+                            if (actions.onDelete != null) {
+                                OutlinedButton(onClick = actions.onDelete, contentPadding = ButtonDefaults.TextButtonContentPadding) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                                }
+                            }
                         }
                     }
                 }

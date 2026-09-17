@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
+import com.khasmek.birdwatch.data.DeviceOverride
 import com.khasmek.birdwatch.data.ExportFormat
 import com.khasmek.birdwatch.data.ScanSession
 import com.khasmek.birdwatch.detection.DetectedDevice
@@ -14,8 +15,11 @@ import com.khasmek.birdwatch.detection.ScanStatus
 import com.khasmek.birdwatch.location.LocationState
 import com.khasmek.birdwatch.usb.UsbState
 import com.khasmek.birdwatch.wifi.WifiScanStatus
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -46,8 +50,8 @@ data class DashboardUiState(
     val wifi: WifiScanStatus = WifiScanStatus(),
     /** Category filter for the list; null = everything. Counts always cover everything. */
     val filter: DeviceCategory? = null,
-    /** User aliases by MAC (device_overrides). */
-    val aliases: Map<String, String> = emptyMap(),
+    /** The user's per-device edits by MAC (device_overrides). */
+    val overrides: Map<String, DeviceOverride> = emptyMap(),
 ) {
     val isActive: Boolean get() = session != null
     val totalCount: Int get() = devices.size
@@ -151,8 +155,27 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
             filter = f,
         )
     }.combine(container.database.deviceOverrideDao().observeAll()) { s, overrides ->
-        s.copy(aliases = overrides.mapNotNull { o -> o.alias?.takeIf { it.isNotBlank() }?.let { o.macAddress to it } }.toMap())
+        s.copy(overrides = overrides.associateBy { it.macAddress })
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
+
+    // ---- per-device edits ----------------------------------------------------------------
+
+    private val editor = container.deviceEditor
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    /** One-line outcomes of edits, for the screen to toast. */
+    val messages: Flow<String> = _messages.receiveAsFlow()
+
+    fun setAlias(mac: String, alias: String?) = edit { editor.setAlias(mac, alias) }
+    fun toggleHidden(mac: String) = edit { editor.setHidden(mac, uiState.value.overrides[mac]?.hidden != true) }
+    /** Remove the device from the running session only. */
+    fun deleteDetection(mac: String) = edit {
+        val id = sessionManager.currentSession.value?.id ?: return@edit "No session is running"
+        editor.deleteDetections(mac, listOf(id))
+    }
+
+    private fun edit(block: suspend () -> String) {
+        viewModelScope.launch { _messages.send(block()) }
+    }
 
     fun toggleSession() {
         if (sessionManager.isActive) sessionManager.stop()
