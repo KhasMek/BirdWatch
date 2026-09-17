@@ -17,8 +17,10 @@ import kotlinx.coroutines.launch
 
 data class SettingsUiState(
     val loaded: Boolean = false,
-    /** Stored key, or null. Never shown in full by the UI unless the user toggles visibility. */
+    /** The user's own key, or null. Never shown in full by the UI unless the user toggles visibility. */
     val mapsApiKey: String? = null,
+    /** This build ships a key of its own, so the map works without the user entering one. */
+    val builtInKey: Boolean = MapsKeyInjector.builtInKey != null,
     val audioAlerts: Boolean = true,
     val quietKnownAlerts: Boolean = true,
     val lowPowerScan: Boolean = false,
@@ -61,7 +63,11 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         .combine(settings.quietKnownAlerts) { s, quiet -> s.copy(quietKnownAlerts = quiet) }
         // Reactive, so the hint appears the moment a different key is saved and never disappears
         // while the SDK still holds the old one.
-        .combine(MapsKeyInjector.keyInUse) { s, inUse -> s.copy(restartRequired = s.mapsApiKey != null && inUse != null && inUse != s.mapsApiKey) }
+        .combine(MapsKeyInjector.keyInUse) { s, inUse ->
+            // Restart needed when the key the map should now use differs from the one the SDK loaded.
+            val effective = MapsKeyInjector.effectiveKey(s.mapsApiKey)
+            s.copy(restartRequired = effective != null && inUse != null && inUse != effective)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     /** Validate format and persist. Returns the outcome for the screen to toast. */

@@ -139,7 +139,8 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         mapsState,
         _scope,
         devices,
-    ) { loaded, key, (ready, failed, inUse), scope, devices ->
+    ) { loaded, userKey, (ready, failed, inUse), scope, devices ->
+        val key = MapsKeyInjector.effectiveKey(userKey)
         MapUiState(
             loaded = loaded, apiKey = key, mapsReady = ready, mapsInitFailed = failed,
             staleKey = key != null && inUse != null && inUse != key,
@@ -151,9 +152,9 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         .combine(overrideDao.observeAll()) { s, overrides -> s.copy(overrides = overrides.associateBy { it.macAddress }) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())
 
-    /** Inject the stored key into the Maps SDK. Safe to call on every entry to the map screen. */
+    /** Inject the effective key into the Maps SDK. Safe to call on every entry to the map screen. */
     fun ensureMapsInitialized() {
-        val key = secure.mapsApiKey.value ?: return
+        val key = MapsKeyInjector.effectiveKey(secure.mapsApiKey.value) ?: return
         val ok = MapsKeyInjector.initialize(container.appContext, key)
         _mapsReady.value = ok
         _mapsInitFailed.value = !ok

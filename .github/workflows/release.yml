@@ -96,9 +96,21 @@ jobs:
 
       # The signing config is read from the environment when Gradle configures the build, so
       # every Gradle call in this job must carry these variables. Tests run in the same call.
+      # MAPS_API_KEY is the project's Google Maps key, restricted in the Cloud Console to this
+      # package + the release certificate + the Maps SDK for Android. Optional: without it the
+      # map needs a key entered in Settings, which is a poor experience for users, so warn.
+      - name: Check for the built-in Maps key
+        env:
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: |
+          if [ -z "$MAPS_API_KEY" ]; then
+            echo "::warning::MAPS_API_KEY secret is not set; this release will need users to enter their own Maps key"
+          fi
+
       - name: Build signed release APK
         env:
           BIRDWATCH_VERSION: ${{ env.RELEASE_TAG }}
+          BIRDWATCH_MAPS_KEY: ${{ secrets.MAPS_API_KEY }}
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}

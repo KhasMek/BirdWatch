@@ -92,8 +92,15 @@ fun SettingsScreen(
         ) {
             SectionTitle("Google Maps")
             Text(
-                "The wardriving map needs your own Google Maps API key (Maps SDK for Android). " +
-                    "It is stored encrypted on this device and never leaves it. Everything else works without one.",
+                if (state.builtInKey) {
+                    "The map works out of the box with BirdWatch's own key, which is locked to this app and can only " +
+                        "draw maps. Enter a key here only if you want to use your own; it is stored encrypted on this " +
+                        "device and never leaves it."
+                } else {
+                    "This build has no built-in map key, so the map needs your own Google Maps API key " +
+                        "(Maps SDK for Android). It is stored encrypted on this device and never leaves it. " +
+                        "Everything else works without one."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -101,7 +108,7 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = keyInput,
                 onValueChange = { keyInput = it },
-                label = { Text("API key") },
+                label = { Text(if (state.builtInKey) "Your own API key (optional)" else "API key") },
                 placeholder = { Text("AIza…") },
                 singleLine = true,
                 enabled = state.loaded,
@@ -120,7 +127,8 @@ fun SettingsScreen(
                         when {
                             !state.loaded -> "Loading…"
                             state.restartRequired -> "Key changed. Restart the app for the map to use it."
-                            state.hasKey -> "Key saved (ends in ${state.keyHint})"
+                            state.hasKey -> "Using your key (ends in ${state.keyHint})"
+                            state.builtInKey -> "Using the built-in key"
                             else -> "No key saved"
                         }
                     )

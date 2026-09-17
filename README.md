@@ -87,8 +87,9 @@ not about attribution.
   stopped advertising over Bluetooth and stopped running a WiFi access point in 2025-2026, so the
   only remaining signal is their probe requests, which a phone's WiFi chip cannot see. The ESP32
   can. Without it, BirdWatch still does everything else.
-- **Optional:** your own Google Maps API key for the map tab (free tier is plenty). Detection,
-  sessions, and export work without one.
+- Nothing else. The map works out of the box: release builds carry a Google Maps key that is
+  locked to this app and can only draw maps (Google does not charge for map loads in Android
+  apps). Only people building from source need their own key; see step 4.
 
 Note that a phone in USB-host mode does not charge from the cable; bring a full battery or a
 powered OTG hub for long drives.
@@ -129,12 +130,21 @@ build downloads dependencies.
    The dashboard's status row shows **ESP32 on** when the link is up.
 3. Press **Start scan**. That's it.
 
-### 4. Optional: a Google Maps API key for the Map tab
+### 4. The Map tab and Google Maps keys
 
-The map uses Google's Maps SDK, which needs an API key tied to your own Google account. BirdWatch
-does not ship one, so nobody else's quota or billing is involved and the key never leaves your
-phone (it is stored encrypted and injected into the map at runtime). Everything except the Map tab
-works without it.
+If you installed a release from the Releases page, skip this step: the map already works.
+
+Release builds ship a Google Maps key that belongs to the project. It is restricted in Google's
+console to the `com.khasmek.birdwatch` package signed with the release certificate and to the
+"Maps SDK for Android" API only, so a copy pulled out of the APK cannot be used by another app or
+for any other Google service. The Maps SDK for Android has no per-load charge (Google lists its
+SKU with an unlimited free cap), which is why one shared key is fine.
+
+You only need your own key if you **build from source**: a debug build is signed with your
+machine's certificate, which the project key is not restricted to, so the map shows grey tiles
+until you either add your debug certificate's SHA-1 to a key of your own or enter a key in
+Settings. A key entered in Settings is stored encrypted on the phone, never leaves it, and takes
+precedence over the built-in one.
 
 **Create the key**
 
@@ -201,8 +211,8 @@ for drone vendor prefixes, which show up as WiFi access points. Android limits h
 scan, so results refresh every 15 to 30 seconds. On a rooted phone,
 `adb shell settings put global wifi_scan_throttle_enabled 0` removes the limit.
 
-**Map.** Needs your own Google Maps API key; see [step 4](#4-optional-a-google-maps-api-key-for-the-map-tab)
-above for creating one and locking it to this app. Markers are coloured by category. Remote ID drones appear at their self-reported
+**Map.** Works out of the box in release builds; builders from source see
+[step 4](#4-the-map-tab-and-google-maps-keys). Markers are coloured by category. Remote ID drones appear at their self-reported
 position with a second marker for the operator and a dashed line between them. Switch between
 the current session and all sessions with the chips above the map, and switch whole categories
 on or off with the second row of chips. In *All sessions* a device is one pin no matter how many

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import com.google.android.gms.maps.MapsInitializer
+import com.khasmek.birdwatch.BuildConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,12 @@ import kotlinx.coroutines.flow.asStateFlow
 object MapsKeyInjector {
     private const val TAG = "BirdWatch/MapsKey"
     const val META_KEY = "com.google.android.geo.API_KEY"
+
+    /** The key compiled into this build (release builds ship one), or null when the build has none. */
+    val builtInKey: String? = BuildConfig.MAPS_API_KEY.takeIf { it.isNotBlank() }
+
+    /** The key the map should use: the user's own if they entered one, else the built-in one. */
+    fun effectiveKey(userKey: String?): String? = userKey?.takeIf { it.isNotBlank() } ?: builtInKey
 
     private val _keyInUse = MutableStateFlow<String?>(null)
 

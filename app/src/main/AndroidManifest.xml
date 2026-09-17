@@ -54,11 +54,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.BirdWatch">
 
-        <!-- Intentionally empty. The user's key is injected at runtime by MapsKeyInjector.
-             Never put a real key here. -->
+        <!-- Filled at build time from BIRDWATCH_MAPS_KEY / keystore.properties (see
+             app/build.gradle.kts); empty in builds without one, in which case MapsKeyInjector
+             injects the key the user entered in Settings. Never write a literal key here. -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="" />
+            android:value="${mapsApiKey}" />
 
         <!-- singleTask: the USB_DEVICE_ATTACHED filter below would otherwise stack a second copy of
              the activity on top of a running one every time the ESP32 is plugged in. -->

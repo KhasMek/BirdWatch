@@ -45,6 +45,17 @@ fun signingValue(env: String, prop: String): String? =
     System.getenv(env)?.takeIf { it.isNotBlank() } ?: keystoreProps.getProperty(prop)
 val releaseStoreFile: String? = signingValue("ANDROID_KEYSTORE_FILE", "storeFile")
 
+// ---------------------------------------------------------------------------------------------
+// Built-in Google Maps key. The Maps SDK for Android has no per-load charge (its SKU is listed
+// with an unlimited free cap), so the project ships ONE key, restricted in the Cloud Console to
+// this package + the release signing certificate + the "Maps SDK for Android" API only. Users
+// then need no setup at all. Comes from BIRDWATCH_MAPS_KEY (CI secret) or `mapsApiKey` in the
+// gitignored keystore.properties; absent, the map falls back to a key entered in Settings.
+// Debug builds are signed with a different certificate, so the restricted key will not work in
+// them unless that certificate's SHA-1 is also added to the key; Settings override covers dev.
+// ---------------------------------------------------------------------------------------------
+val builtInMapsKey: String = signingValue("BIRDWATCH_MAPS_KEY", "mapsApiKey")?.trim().orEmpty()
+
 // A versioned build is a real release: never let it fall back to the debug key silently.
 if (requestedVersion != null && releaseStoreFile == null) {
     throw GradleException(
@@ -67,6 +78,11 @@ android {
         versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Empty when no key is configured; the manifest placeholder then stays empty and the app
+        // uses whatever the user enters in Settings.
+        manifestPlaceholders["mapsApiKey"] = builtInMapsKey
+        buildConfigField("String", "MAPS_API_KEY", "\"$builtInMapsKey\"")
     }
 
     signingConfigs {

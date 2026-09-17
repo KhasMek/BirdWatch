@@ -57,7 +57,7 @@ phone's `WifiManager` scan for camera detection (it only sees APs, which cameras
   CDC ACM, 115200 baud. Needs `android.hardware.usb.host` and a USB permission prompt. No root.
 - **GPS:** Play Services `FusedLocationProviderClient`, high accuracy while a session runs.
 - **Storage:** Room (KSP). Two tables: `detected_devices`, `scan_sessions`.
-- **Maps:** maps-compose + play-services-maps, user-provided API key at runtime (see below).
+- **Maps:** maps-compose + play-services-maps; built-in key in release builds, user override in Settings (see below).
 - **Export:** JSON, CSV, KML via FileProvider + share sheet.
 - **Audio:** SoundPool / ToneGenerator, built-in tones, no asset files.
 - **DI:** manual, via `AppContainer` in `BirdWatchApp.kt`. No Hilt.
@@ -294,12 +294,16 @@ All start/stop/mode transitions run under one lock because they arrive from the 
 a Default dispatcher and the binder thread. `MainActivity` is `singleTask` so the
 `USB_DEVICE_ATTACHED` filter does not stack a second instance.
 
-### User-provided Google Maps API key (Phase 7)
-No key ships in source, build config, or manifest. The manifest carries an empty
-`com.google.android.geo.API_KEY` placeholder; the user enters a key in Settings, stored in
-`EncryptedSharedPreferences`, injected into `ApplicationInfo.metaData` before the map loads. The
-Map tab shows a prompt with a button to Settings when no key is stored. Everything except the map
-works without a key. Help link: https://developers.google.com/maps/documentation/android-sdk/get-api-key
+### Google Maps API key
+Release builds ship the project's own key (the Maps SDK for Android has no per-load charge; the
+key is restricted in the Cloud Console to the package + release certificate SHA-1 + the Android
+Maps SDK API). It enters the build as `BIRDWATCH_MAPS_KEY` (CI secret `MAPS_API_KEY`) or
+`mapsApiKey` in the gitignored `keystore.properties`, and lands in `BuildConfig.MAPS_API_KEY` and
+the manifest `${mapsApiKey}` placeholder. **No literal key ever goes in source or the manifest.**
+A key the user enters in Settings (stored in `EncryptedSharedPreferences`) takes precedence:
+`MapsKeyInjector.effectiveKey(userKey)` picks, and the injector writes it into
+`ApplicationInfo.metaData` before the map loads. Builds without a key (debug, forks) show the
+"needs an API key" prompt. Help link: https://developers.google.com/maps/documentation/android-sdk/get-api-key
 
 ## Phases
 
