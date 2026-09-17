@@ -48,6 +48,15 @@ interface DetectionDao {
     /** Devices per type across all sessions (the backup picker groups these into categories). */
     @Query("SELECT deviceType, COUNT(*) AS count FROM detected_devices GROUP BY deviceType")
     suspend fun countByType(): List<TypeCount>
+
+    /** How many sessions each MAC appears in, for the "seen before" badge and quieter alerts. */
+    @Query("SELECT macAddress, COUNT(DISTINCT sessionId) AS sessions FROM detected_devices GROUP BY macAddress")
+    fun observeSessionsPerMac(): Flow<List<MacSessions>>
+
+    @Query("SELECT macAddress, COUNT(DISTINCT sessionId) AS sessions FROM detected_devices GROUP BY macAddress")
+    suspend fun getSessionsPerMac(): List<MacSessions>
 }
 
 data class TypeCount(val deviceType: DeviceType, val count: Int)
+
+data class MacSessions(val macAddress: String, val sessions: Int)

@@ -236,6 +236,7 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                                 onToggleHidden = { viewModel.toggleHidden(device.macAddress) },
                                 onDelete = { deleteMac = device.macAddress },
                             ),
+                            priorSessions = state.priorSessions(device.macAddress),
                         )
                     }
                 }

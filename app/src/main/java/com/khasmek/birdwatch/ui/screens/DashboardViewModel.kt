@@ -52,7 +52,12 @@ data class DashboardUiState(
     val filter: DeviceCategory? = null,
     /** The user's per-device edits by MAC (device_overrides). */
     val overrides: Map<String, DeviceOverride> = emptyMap(),
+    /** Sessions each MAC appears in, across the whole database (includes the running one). */
+    val sessionsPerMac: Map<String, Int> = emptyMap(),
 ) {
+    /** Earlier sessions that also saw [mac]: everything except the running one. */
+    fun priorSessions(mac: String): Int = ((sessionsPerMac[mac] ?: 1) - 1).coerceAtLeast(0)
+
     val isActive: Boolean get() = session != null
     val totalCount: Int get() = devices.size
     val flockCount: Int get() = devices.count { it.deviceType.category == DeviceCategory.FLOCK_ALPR }
@@ -156,6 +161,8 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         )
     }.combine(container.database.deviceOverrideDao().observeAll()) { s, overrides ->
         s.copy(overrides = overrides.associateBy { it.macAddress })
+    }.combine(container.database.detectionDao().observeSessionsPerMac()) { s, counts ->
+        s.copy(sessionsPerMac = counts.associate { it.macAddress to it.sessions })
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
 
     // ---- per-device edits ----------------------------------------------------------------

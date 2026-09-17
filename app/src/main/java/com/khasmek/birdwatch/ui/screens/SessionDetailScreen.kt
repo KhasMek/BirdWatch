@@ -192,6 +192,7 @@ fun SessionDetailScreen(
                                 onToggleHidden = { viewModel.toggleHidden(device.macAddress) },
                                 onDelete = { deleteMac = device.macAddress },
                             ),
+                            priorSessions = state.priorSessions(device.macAddress),
                         )
                     }
                 }

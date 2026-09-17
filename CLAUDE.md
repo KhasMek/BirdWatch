@@ -134,6 +134,12 @@ where `DetectedDevice.hasStableIdentity` (not Meta glasses, not Remote ID drones
 rotate). Aliases also show on the Dashboard and session detail cards. Delete all data wipes
 overrides too.
 
+**Seen before**: `SessionManager` snapshots `detectionDao.getSessionsPerMac()` at session start
+(`knownAtStart`, so the running session never counts itself); `AlertSounds.playFor` plays the low
+`ToneSynth.tick()` instead of the chirp when `priorSessions > 0` and `AppSettings.quietKnownAlerts`
+is on. Cards get a "seen N× before" tag from the live `observeSessionsPerMac()` flow (count minus
+the session being shown).
+
 Edits travel with the files: `ExportWriter` takes an `Overrides` map and writes the
 *corrected* position as `latitude`/`longitude`, adds `alias`, and (JSON) a `user_edit` object
 with `position_edited`, `detected_latitude/longitude`, `hidden`, `updated_at` (CSV: the same as

@@ -24,6 +24,8 @@ import kotlin.math.sin
  *
  *  - high-confidence hit: two-note ascending chirp, 2000 Hz -> 2800 Hz, 55 ms notes (firmware tier 4)
  *  - low-confidence hit:  single 1200 Hz blip, 45 ms (firmware tier 2)
+ *  - device seen in an earlier session: a short low tick, when "quieter alerts for known devices"
+ *    is on. On a route you drive often, only the *new* thing should make you look at the phone.
  */
 class AlertSounds(context: Context, private val settings: AppSettings) {
 
@@ -44,6 +46,7 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
 
     @Volatile private var chirpId = 0
     @Volatile private var blipId = 0
+    @Volatile private var tickId = 0
     private val loaded = HashSet<Int>()
 
     init {
@@ -53,22 +56,32 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
         }
     }
 
-    /** Synthesize + load the tones and subscribe to new detections. Call once from Application. */
-    fun start(newDetections: Flow<DetectedDevice>, scope: CoroutineScope) {
+    /**
+     * Synthesize + load the tones and subscribe to new detections. Call once from Application.
+     * [priorSessions] says how many earlier sessions already saw a MAC (0 = new to this phone).
+     */
+    fun start(newDetections: Flow<DetectedDevice>, scope: CoroutineScope, priorSessions: (String) -> Int) {
         scope.launch {
             withContext(Dispatchers.IO) { loadTones() }
-            newDetections.collect { playFor(it) }
+            newDetections.collect { playFor(it, priorSessions(it.macAddress)) }
         }
     }
 
-    fun playFor(device: DetectedDevice) {
+    fun playFor(device: DetectedDevice, priorSessions: Int = 0) {
         if (!settings.audioAlerts.value) return
-        val id = if (device.confidence == Confidence.HIGH) chirpId else blipId
+        val id = when {
+            priorSessions > 0 && settings.quietKnownAlerts.value -> tickId
+            device.confidence == Confidence.HIGH -> chirpId
+            else -> blipId
+        }
         play(id)
     }
 
     /** Preview for the settings screen. False if the tones are not loaded yet. */
     fun playTest(): Boolean = play(chirpId)
+
+    /** Preview of the known-device tick. */
+    fun playTestTick(): Boolean = play(tickId)
 
     private fun play(id: Int): Boolean {
         if (id == 0 || synchronized(loaded) { id !in loaded }) return false
@@ -79,10 +92,13 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
         try {
             val chirp = File(appContext.cacheDir, "chirp_high.wav")
             val blip = File(appContext.cacheDir, "blip_low.wav")
+            val tick = File(appContext.cacheDir, "tick_known.wav")
             if (!chirp.exists()) writeWav(chirp, ToneSynth.chirp())
             if (!blip.exists()) writeWav(blip, ToneSynth.blip())
+            if (!tick.exists()) writeWav(tick, ToneSynth.tick())
             chirpId = soundPool.load(chirp.path, 1)
             blipId = soundPool.load(blip.path, 1)
+            tickId = soundPool.load(tick.path, 1)
         } catch (e: Exception) {
             Log.e(TAG, "failed to prepare alert tones", e)
         }
@@ -106,6 +122,9 @@ object ToneSynth {
 
     /** Single blip: 1200 Hz 45 ms. */
     fun blip(): ShortArray = tone(1200.0, 45)
+
+    /** Known-device tick: 700 Hz, 30 ms, at a third of the chirp's level. Noticeable, not startling. */
+    fun tick(): ShortArray = tone(700.0, 30, amplitude = 0.2)
 
     fun tone(hz: Double, ms: Int, amplitude: Double = 0.6): ShortArray {
         val n = SAMPLE_RATE * ms / 1000

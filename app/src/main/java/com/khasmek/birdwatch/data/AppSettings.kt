@@ -20,6 +20,10 @@ class AppSettings(context: Context) {
     /** Play a chirp when a new device is detected. */
     val audioAlerts: StateFlow<Boolean> = _audioAlerts.asStateFlow()
 
+    private val _quietKnownAlerts = MutableStateFlow(prefs.getBoolean(KEY_QUIET_KNOWN, true))
+    /** Play a short low tick instead of the chirp for a device already seen in an earlier session. */
+    val quietKnownAlerts: StateFlow<Boolean> = _quietKnownAlerts.asStateFlow()
+
     private val _lowPowerScan = MutableStateFlow(prefs.getBoolean(KEY_LOW_POWER, false))
     /** Prefer SCAN_MODE_LOW_POWER over SCAN_MODE_LOW_LATENCY for the phone BLE scanner. */
     val lowPowerScan: StateFlow<Boolean> = _lowPowerScan.asStateFlow()
@@ -38,6 +42,11 @@ class AppSettings(context: Context) {
     fun setAudioAlerts(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_AUDIO, enabled) }
         _audioAlerts.value = enabled
+    }
+
+    fun setQuietKnownAlerts(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_QUIET_KNOWN, enabled) }
+        _quietKnownAlerts.value = enabled
     }
 
     fun setLowPowerScan(enabled: Boolean) {
@@ -65,6 +74,7 @@ class AppSettings(context: Context) {
     private companion object {
         const val FILE = "birdwatch_settings"
         const val KEY_AUDIO = "audio_alerts"
+        const val KEY_QUIET_KNOWN = "quiet_known_alerts"
         const val KEY_LOW_POWER = "low_power_scan"
         const val KEY_PACKS = "enabled_packs"
         const val KEY_WIFI_AP = "wifi_ap_scan"

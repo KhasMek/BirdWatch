@@ -285,7 +285,12 @@ data class SessionDetailUiState(
     val loaded: Boolean = false,
     /** The user's per-device edits by MAC (device_overrides). */
     val overrides: Map<String, DeviceOverride> = emptyMap(),
-)
+    /** Sessions each MAC appears in, across the whole database (includes this one). */
+    val sessionsPerMac: Map<String, Int> = emptyMap(),
+) {
+    /** Other sessions that also saw [mac]. */
+    fun priorSessions(mac: String): Int = ((sessionsPerMac[mac] ?: 1) - 1).coerceAtLeast(0)
+}
 
 /** One session: summary header + its devices, with the per-device edit actions. */
 class SessionDetailViewModel(private val container: AppContainer, private val sessionId: String) : ViewModel() {
@@ -307,6 +312,8 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
             summary = summary, devices = devices, isActive = active, loaded = true,
             overrides = overrides.associateBy { it.macAddress },
         )
+    }.combine(container.database.detectionDao().observeSessionsPerMac()) { s, counts ->
+        s.copy(sessionsPerMac = counts.associate { it.macAddress to it.sessions })
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SessionDetailUiState())
 
     suspend fun export(format: ExportFormat): Intent? = container.exportManager.export(sessionId, format)

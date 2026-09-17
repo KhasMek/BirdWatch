@@ -58,7 +58,7 @@ class BirdWatchApp : Application() {
         instance = this
         container = AppContainer(this)
         // Audio alerts follow every session regardless of which screen is open.
-        container.alertSounds.start(container.sessionManager.newDetections, container.appScope)
+        container.alertSounds.start(container.sessionManager.newDetections, container.appScope, container.sessionManager::priorSessions)
         // Signature-pack toggles apply to both phone radios immediately, mid-session included.
         container.appScope.launch {
             container.settings.enabledPacks.collect {

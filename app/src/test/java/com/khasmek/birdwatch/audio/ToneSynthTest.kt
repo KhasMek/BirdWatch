@@ -13,6 +13,15 @@ class ToneSynthTest {
     }
 
     @Test
+    fun `known-device tick is shorter and quieter than the blip`() {
+        val tick = ToneSynth.tick()
+        val blip = ToneSynth.blip()
+        assertTrue(tick.size < blip.size)
+        val peak = { t: ShortArray -> t.maxOf { kotlin.math.abs(it.toInt()) } }
+        assertTrue(peak(tick) < peak(blip) / 2)
+    }
+
+    @Test
     fun `tone starts and ends near silence and peaks near amplitude`() {
         val t = ToneSynth.tone(1000.0, 50, amplitude = 0.5)
         assertEquals(0, t.first().toInt())

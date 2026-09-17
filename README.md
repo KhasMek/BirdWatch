@@ -208,6 +208,11 @@ the current session and all sessions with the chips above the map, and switch wh
 on or off with the second row of chips. In *All sessions* a device is one pin no matter how many
 times you drove past it.
 
+**Seen before.** A device that was already recorded in an earlier session gets a "seen N× before"
+tag on its card, and by default plays a short low tick instead of the chirp, so on a route you
+drive often only new hardware makes you look at the phone. The tick can be switched back to the
+full chirp in Settings.
+
 **Editing a device.** Tap a pin for its details and the edit buttons. *Move pin* puts a crosshair
 over the map: pan until it sits on the device (or tap *My location* if you're standing next to
 it) and save; every session that saw the device now draws it there, and the detected position

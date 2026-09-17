@@ -77,6 +77,17 @@ class SessionManager(
     private val seenMacs = HashSet<String>()
 
     /**
+     * Sessions each MAC had appeared in when the current session started. Frozen at start so
+     * "seen before" means "before this run": a device the last flush just wrote does not count
+     * against itself. Read by the alert sounds to play a quieter tone for a known device.
+     */
+    @Volatile
+    private var knownAtStart: Map<String, Int> = emptyMap()
+
+    /** How many earlier sessions saw [macAddress] (0 = new to this phone) as of session start. */
+    fun priorSessions(macAddress: String): Int = knownAtStart[DetectionTable.normalizeMac(macAddress)] ?: 0
+
+    /**
      * First sighting of every MAC from any source. Drives audio alerts and the immediate write of
      * a new row. Shared so the alert collector and the persist loop both see every emission after
      * the cross-source de-duplication.
@@ -131,6 +142,9 @@ class SessionManager(
 
     suspend fun startSuspending(scanMode: Int = ScanSettings.SCAN_MODE_LOW_LATENCY): ScanSession = mutex.withLock {
         _currentSession.value?.let { return it }
+
+        // Snapshot before the new session exists, so it never counts itself.
+        knownAtStart = detectionDao.getSessionsPerMac().associate { DetectionTable.normalizeMac(it.macAddress) to it.sessions }
 
         val session = ScanSession(id = UUID.randomUUID().toString(), startedAt = System.currentTimeMillis())
         sessionDao.insert(session)

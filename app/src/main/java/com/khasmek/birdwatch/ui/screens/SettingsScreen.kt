@@ -158,10 +158,23 @@ fun SettingsScreen(
                 checked = state.audioAlerts,
                 onCheckedChange = viewModel::setAudioAlerts,
             )
-            TextButton(
-                onClick = { if (!viewModel.playTestChirp()) toast("Alert tones are still loading; try again in a moment.") },
-                enabled = state.audioAlerts,
-            ) { Text("Play test chirp") }
+            ToggleRow(
+                title = "Quieter alert for devices seen before",
+                subtitle = "A short low tick instead of the chirp when the device was already recorded in an earlier " +
+                    "session, so only new hardware makes you look at the phone. Its card says how many times it was seen.",
+                checked = state.quietKnownAlerts,
+                onCheckedChange = viewModel::setQuietKnownAlerts,
+            )
+            Row {
+                TextButton(
+                    onClick = { if (!viewModel.playTestChirp()) toast("Alert tones are still loading; try again in a moment.") },
+                    enabled = state.audioAlerts,
+                ) { Text("Play test chirp") }
+                TextButton(
+                    onClick = { if (!viewModel.playTestTick()) toast("Alert tones are still loading; try again in a moment.") },
+                    enabled = state.audioAlerts && state.quietKnownAlerts,
+                ) { Text("Play test tick") }
+            }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()

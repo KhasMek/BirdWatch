@@ -20,6 +20,7 @@ data class SettingsUiState(
     /** Stored key, or null. Never shown in full by the UI unless the user toggles visibility. */
     val mapsApiKey: String? = null,
     val audioAlerts: Boolean = true,
+    val quietKnownAlerts: Boolean = true,
     val lowPowerScan: Boolean = false,
     /** A different key is already in use by the Maps SDK; the new one applies after restart. */
     val restartRequired: Boolean = false,
@@ -57,6 +58,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
             enabledPacks = packs,
         )
     }.combine(settings.wifiApScan) { s, wifi -> s.copy(wifiApScan = wifi) }
+        .combine(settings.quietKnownAlerts) { s, quiet -> s.copy(quietKnownAlerts = quiet) }
         // Reactive, so the hint appears the moment a different key is saved and never disappears
         // while the SDK still holds the old one.
         .combine(MapsKeyInjector.keyInUse) { s, inUse -> s.copy(restartRequired = s.mapsApiKey != null && inUse != null && inUse != s.mapsApiKey) }
@@ -91,6 +93,8 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setAudioAlerts(enabled: Boolean) = settings.setAudioAlerts(enabled)
+    fun setQuietKnownAlerts(enabled: Boolean) = settings.setQuietKnownAlerts(enabled)
+    fun playTestTick(): Boolean = container.alertSounds.playTestTick()
     fun setLowPowerScan(enabled: Boolean) = settings.setLowPowerScan(enabled)
     fun setPackEnabled(pack: PackId, enabled: Boolean) = settings.setPackEnabled(pack, enabled)
     fun setWifiApScan(enabled: Boolean) = settings.setWifiApScan(enabled)
