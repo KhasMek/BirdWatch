@@ -107,7 +107,6 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     private val overrideDao = container.database.deviceOverrideDao()
 
     private val _scope = MutableStateFlow(MapScope.ALL_SESSIONS)
-    private val _hidden = MutableStateFlow<Set<DeviceCategory>>(emptySet())
     private val _mapsReady = MutableStateFlow(MapsKeyInjector.isInitialized)
     private val _mapsInitFailed = MutableStateFlow(false)
 
@@ -148,7 +147,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         )
     }.combine(sessionManager.currentSession) { s, session -> s.copy(sessionActive = session != null) }
         .combine(container.locationProvider.state) { s, loc -> s.copy(fix = loc.fix) }
-        .combine(_hidden) { s, hidden -> s.copy(hidden = hidden) }
+        .combine(container.settings.mapHiddenCategories) { s, hidden -> s.copy(hidden = hidden) }
         .combine(overrideDao.observeAll()) { s, overrides -> s.copy(overrides = overrides.associateBy { it.macAddress }) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())
 
@@ -162,9 +161,10 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setScope(scope: MapScope) { _scope.value = scope }
 
-    /** Show or hide one category's markers. */
+    /** Show or hide one category's markers. Persisted, so a category you always hide stays hidden. */
     fun toggleCategory(category: DeviceCategory) {
-        _hidden.value = if (category in _hidden.value) _hidden.value - category else _hidden.value + category
+        val settings = container.settings
+        settings.setMapCategoryHidden(category, hidden = category !in settings.mapHiddenCategories.value)
     }
 
     // ---- per-device edits (shared DeviceEditor; outcome goes to messages) ---------------------

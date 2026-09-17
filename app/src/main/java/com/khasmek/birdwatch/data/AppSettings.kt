@@ -3,6 +3,7 @@ package com.khasmek.birdwatch.data
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import androidx.core.content.edit
+import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.detection.PackId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,8 +37,24 @@ class AppSettings(context: Context) {
     /** Use the phone's WiFi radio to match access-point BSSIDs (third detection source). */
     val wifiApScan: StateFlow<Boolean> = _wifiApScan.asStateFlow()
 
+    private val _mapHiddenCategories = MutableStateFlow(loadHiddenCategories())
+    /** Categories switched off with the chips above the map; kept across launches. */
+    val mapHiddenCategories: StateFlow<Set<DeviceCategory>> = _mapHiddenCategories.asStateFlow()
+
     val scanMode: Int
         get() = if (_lowPowerScan.value) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
+
+    fun setMapCategoryHidden(category: DeviceCategory, hidden: Boolean) {
+        val next = if (hidden) _mapHiddenCategories.value + category else _mapHiddenCategories.value - category
+        prefs.edit { putStringSet(KEY_MAP_HIDDEN, next.map { it.name }.toSet()) }
+        _mapHiddenCategories.value = next
+    }
+
+    private fun loadHiddenCategories(): Set<DeviceCategory> =
+        prefs.getStringSet(KEY_MAP_HIDDEN, emptySet())
+            .orEmpty()
+            .mapNotNull { name -> DeviceCategory.entries.firstOrNull { it.name == name } }
+            .toSet()
 
     fun setAudioAlerts(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_AUDIO, enabled) }
@@ -78,5 +95,6 @@ class AppSettings(context: Context) {
         const val KEY_LOW_POWER = "low_power_scan"
         const val KEY_PACKS = "enabled_packs"
         const val KEY_WIFI_AP = "wifi_ap_scan"
+        const val KEY_MAP_HIDDEN = "map_hidden_categories"
     }
 }
