@@ -35,6 +35,10 @@ interface SessionDao {
     @Query("$SUMMARY_SELECT WHERE s.endedAt IS NOT NULL ORDER BY s.startedAt DESC LIMIT 1")
     fun observePrevious(): Flow<SessionSummary?>
 
+    /** User rename; null clears the label so the start time shows again. */
+    @Query("UPDATE scan_sessions SET label = :label WHERE id = :id")
+    suspend fun updateLabel(id: String, label: String?)
+
     @Query("DELETE FROM scan_sessions WHERE id = :id")
     suspend fun deleteById(id: String)
 

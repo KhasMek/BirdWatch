@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Hearing
 import androidx.compose.material.icons.filled.MoreVert
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.data.ExportFormat
+import com.khasmek.birdwatch.data.SessionOrigin
 import com.khasmek.birdwatch.data.SessionSummary
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
@@ -66,6 +68,7 @@ import com.khasmek.birdwatch.ui.components.ConfirmDeleteDialog
 import com.khasmek.birdwatch.ui.components.DeleteAllDialog
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
 import com.khasmek.birdwatch.ui.components.ImportFromEsp32Dialog
+import com.khasmek.birdwatch.ui.components.RenameSessionDialog
 import com.khasmek.birdwatch.ui.components.RestoreDialog
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.TimeFormat
@@ -92,11 +95,13 @@ fun PreviousSessionScreen(
     // Dialog targets are session ids (saveable), resolved against the live list on each frame.
     var exportTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameTargetId by rememberSaveable { mutableStateOf<String?>(null) }
     var showImport by rememberSaveable { mutableStateOf(false) }
     var showBackup by rememberSaveable { mutableStateOf(false) }
     var showDeleteAll by rememberSaveable { mutableStateOf(false) }
     val exportTarget = exportTargetId?.let { id -> state.sessions.firstOrNull { it.session.id == id } }
     val deleteTarget = deleteTargetId?.let { id -> state.sessions.firstOrNull { it.session.id == id } }
+    val renameTarget = renameTargetId?.let { id -> state.sessions.firstOrNull { it.session.id == id } }
 
     // Outcomes of the long-running operations arrive here, whenever they finish.
     LaunchedEffect(Unit) { viewModel.messages.collect { toast(it) } }
@@ -149,6 +154,14 @@ fun PreviousSessionScreen(
             deviceCount = target.deviceCount,
             onDismiss = { deleteTargetId = null },
             onConfirm = { viewModel.delete(target.session.id); deleteTargetId = null },
+        )
+    }
+    renameTarget?.let { target ->
+        RenameSessionDialog(
+            current = target.session.label,
+            startedAt = TimeFormat.dateTime(target.session.startedAt),
+            onDismiss = { renameTargetId = null },
+            onSave = { viewModel.rename(target.session.id, it); renameTargetId = null },
         )
     }
     if (showImport) {
@@ -275,6 +288,7 @@ fun PreviousSessionScreen(
                         isActive = summary.session.id == state.activeSessionId,
                         onClick = { onOpenSession(summary.session.id) },
                         onExport = { exportTargetId = summary.session.id },
+                        onRename = { renameTargetId = summary.session.id },
                         onDelete = { deleteTargetId = summary.session.id },
                     )
                 }
@@ -289,6 +303,7 @@ private fun SessionRow(
     isActive: Boolean,
     onClick: () -> Unit,
     onExport: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val s = summary.session
@@ -310,11 +325,14 @@ private fun SessionRow(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    text = when {
-                        // ESP32 dumps carry no clock and no GPS; restored exports keep both.
-                        s.label?.startsWith("ESP32") == true -> "Imported ${TimeFormat.dateTime(s.startedAt)} · no GPS"
-                        s.isImported -> "${TimeFormat.dateTime(s.startedAt)} · ${TimeFormat.duration(s.durationMillis())}"
-                        else -> "Duration ${TimeFormat.duration(s.durationMillis())}" + (if (isActive) " (running)" else "")
+                    text = when (s.origin) {
+                        // ESP32 dumps carry no clock and no GPS; imported / restored files keep both.
+                        SessionOrigin.ESP32_IMPORT -> "Imported ${TimeFormat.dateTime(s.startedAt)} · no GPS"
+                        SessionOrigin.FILE_IMPORT, SessionOrigin.RESTORE ->
+                            "${s.origin.label} · ${TimeFormat.dateTime(s.startedAt)} · ${TimeFormat.duration(s.durationMillis())}"
+                        SessionOrigin.LIVE ->
+                            (if (s.label != null) "${TimeFormat.dateTime(s.startedAt)} · " else "") +
+                                "Duration ${TimeFormat.duration(s.durationMillis())}" + (if (isActive) " (running)" else "")
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -349,6 +367,11 @@ private fun SessionRow(
                     text = { Text("Export…") },
                     leadingIcon = { Icon(Icons.Default.Share, null) },
                     onClick = { menu = false; onExport() },
+                )
+                DropdownMenuItem(
+                    text = { Text("Rename…") },
+                    leadingIcon = { Icon(Icons.Default.Edit, null) },
+                    onClick = { menu = false; onRename() },
                 )
                 DropdownMenuItem(
                     text = { Text("Delete") },

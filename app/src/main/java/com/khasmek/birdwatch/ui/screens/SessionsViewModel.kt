@@ -103,6 +103,13 @@ class SessionsViewModel(private val container: AppContainer, private val savedSt
         viewModelScope.launch { sessionManager.deleteSession(sessionId) }
     }
 
+    fun rename(sessionId: String, label: String?) {
+        viewModelScope.launch {
+            runCatching { sessionManager.setLabel(sessionId, label) }
+                .onFailure { _messages.send("Rename failed: ${it.message}") }
+        }
+    }
+
     /** Make sure the ESP32 is open (no-op if already connected or absent). */
     fun connectUsb() = container.usbCompanion.connect()
 
@@ -320,6 +327,11 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
 
     fun delete() {
         viewModelScope.launch { sessionManager.deleteSession(sessionId) }
+    }
+
+    fun rename(label: String?) = edit {
+        runCatching { sessionManager.setLabel(sessionId, label) }
+            .fold(onSuccess = { if (label.isNullOrBlank()) "Name cleared" else "Session renamed" }, onFailure = { "Rename failed: ${it.message}" })
     }
 
     fun setDetails(mac: String, alias: String?, notes: String?) = edit { editor.setDetails(mac, alias, notes) }

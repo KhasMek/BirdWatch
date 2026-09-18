@@ -78,7 +78,7 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
         db.withTransaction {
             filtered.sessions.forEach { b ->
                 if (db.sessionDao().getById(b.session.id) == null) {
-                    db.sessionDao().insert(b.session.copy(label = b.session.label ?: "Restored (${backup.format.label})"))
+                    db.sessionDao().insert(b.session.copy(label = b.session.label ?: "Restored (${backup.format.label})", origin = SessionOrigin.RESTORE))
                     sessionsAdded++
                 } else {
                     sessionsMerged++

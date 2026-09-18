@@ -231,6 +231,7 @@ class SessionManager(
             startedAt = now,
             endedAt = now,
             label = "ESP32 import (${source.label})",
+            origin = SessionOrigin.ESP32_IMPORT,
         )
         val devices = dump.records.map { it.toDetectedDevice(session.id, now) }
             .distinctBy { it.macAddress } // defensive: the firmware table is unique by MAC already
@@ -251,7 +252,10 @@ class SessionManager(
      */
     suspend fun importExported(parsed: ImportedSession): ImportedSession {
         if (sessionDao.getById(parsed.session.id) != null) throw AlreadyImportedException(parsed.session.id)
-        val session = parsed.session.copy(label = parsed.session.label ?: "Imported (${parsed.format.label})")
+        val session = parsed.session.copy(
+            label = parsed.session.label ?: "Imported (${parsed.format.label})",
+            origin = SessionOrigin.FILE_IMPORT,
+        )
         var edits = 0
         db.withTransaction {
             sessionDao.insert(session)
@@ -281,6 +285,15 @@ class SessionManager(
         val removed = detectionDao.deleteDevice(mac, ids)
         Log.i(TAG, "Deleted $removed detection(s) of $mac from ${ids.size} session(s)")
         removed
+    }
+
+    /** Rename a session; blank clears the label so the start time shows again. */
+    suspend fun setLabel(sessionId: String, label: String?) {
+        val clean = label?.trim()?.takeIf { it.isNotEmpty() }
+        sessionDao.updateLabel(sessionId, clean)
+        // Keep the in-memory current session in step so the Dashboard title follows.
+        _currentSession.value?.let { if (it.id == sessionId) _currentSession.value = it.copy(label = clean) }
+        Log.i(TAG, "Session $sessionId renamed to ${clean ?: "<none>"}")
     }
 
     suspend fun deleteSession(sessionId: String) {

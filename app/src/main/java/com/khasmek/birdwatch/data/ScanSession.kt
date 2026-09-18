@@ -1,8 +1,21 @@
 package com.khasmek.birdwatch.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+
+/** How a session came to exist on this phone. Stored by name (schema v6). */
+enum class SessionOrigin(val label: String) {
+    /** A scan run on this phone. */
+    LIVE("Live scan"),
+    /** Pulled from the ESP32's memory or flash; no clock, no GPS. */
+    ESP32_IMPORT("ESP32 import"),
+    /** "Import session…" from one of the app's export files. */
+    FILE_IMPORT("Imported"),
+    /** Added by "Restore…" from a backup. */
+    RESTORE("Restored"),
+}
 
 /** One scan session: from the user pressing start until stop (or the app dying), or an import. */
 @Entity(tableName = "scan_sessions")
@@ -13,13 +26,16 @@ data class ScanSession(
     /** Epoch millis; null while the session is still running. */
     val endedAt: Long? = null,
     /**
-     * Optional display name (schema v3). Set for sessions imported from the ESP32's memory or
-     * flash, e.g. "ESP32 import (flash)", so they are distinguishable from live scans.
+     * Optional display name (schema v3). The user can set one ("Rename…"); ESP32 imports get
+     * "ESP32 import (memory|flash)" by default so the two tables stay distinguishable.
      */
     val label: String? = null,
+    /** Where the session came from (schema v6); drives the "imported" hints, not the label. */
+    @ColumnInfo(defaultValue = "LIVE")
+    val origin: SessionOrigin = SessionOrigin.LIVE,
 ) {
     val isActive: Boolean get() = endedAt == null
-    val isImported: Boolean get() = label != null
+    val isImported: Boolean get() = origin != SessionOrigin.LIVE
 
     /** Duration so far (active) or total (ended), in millis. */
     fun durationMillis(now: Long = System.currentTimeMillis()): Long = (endedAt ?: now) - startedAt

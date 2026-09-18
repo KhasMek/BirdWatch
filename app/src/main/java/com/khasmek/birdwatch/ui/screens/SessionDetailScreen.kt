@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,6 +44,7 @@ import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
 import com.khasmek.birdwatch.ui.components.DeviceCardActions
 import com.khasmek.birdwatch.ui.components.ExportFormatDialog
+import com.khasmek.birdwatch.ui.components.RenameSessionDialog
 import com.khasmek.birdwatch.util.TimeFormat
 import kotlinx.coroutines.launch
 
@@ -60,6 +62,18 @@ fun SessionDetailScreen(
     var showDelete by rememberSaveable { mutableStateOf(false) }
     var aliasMac by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteMac by rememberSaveable { mutableStateOf<String?>(null) }
+    var showRename by rememberSaveable { mutableStateOf(false) }
+
+    if (showRename) {
+        state.summary?.session?.let { session ->
+            RenameSessionDialog(
+                current = session.label,
+                startedAt = TimeFormat.dateTime(session.startedAt),
+                onDismiss = { showRename = false },
+                onSave = { viewModel.rename(it); showRename = false },
+            )
+        }
+    }
 
     // Session deleted (here or elsewhere) -> leave the screen.
     LaunchedEffect(state.loaded, state.summary) { if (state.loaded && state.summary == null) onBack() }
@@ -122,7 +136,7 @@ fun SessionDetailScreen(
                         Text(s?.label ?: if (state.isActive) "Current session" else "Session")
                         s?.let {
                             Text(
-                                (if (it.isImported) "Imported " else "") + TimeFormat.dateTime(it.startedAt),
+                                (if (it.isImported) "${it.origin.label} · " else "") + TimeFormat.dateTime(it.startedAt),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -133,6 +147,9 @@ fun SessionDetailScreen(
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
                 actions = {
+                    IconButton(onClick = { showRename = true }, enabled = s != null) {
+                        Icon(Icons.Default.Edit, contentDescription = "Rename session")
+                    }
                     IconButton(onClick = { showExport = true }, enabled = s != null) {
                         Icon(Icons.Default.Share, contentDescription = "Export")
                     }

@@ -234,8 +234,8 @@ a session's detail view. Move, alias and notes are only offered for devices with
 smart glasses and Remote ID drones rotate theirs.
 
 **Sessions and export.** Every scan is a session. The Sessions tab lists them with counts; tap
-one for its detections, share it as JSON, CSV or KML through the Android share sheet, or delete
-it. The export icon on the dashboard shares the session that's running right now. Exports use
+one for its detections, share it as JSON, CSV or KML through the Android share sheet, rename it
+("Downtown loop" beats a timestamp), or delete it. The export icon on the dashboard shares the session that's running right now. Exports use
 the corrected position, alias and notes when you've set them (the detected position rides along
 as `detected_latitude`/`detected_longitude`), and hidden devices are left out of KML.
 

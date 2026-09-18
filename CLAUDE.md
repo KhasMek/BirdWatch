@@ -119,9 +119,17 @@ app/src/main/java/com/khasmek/birdwatch/
 
 ## Data model
 
-Room schema **v5** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
+Room schema **v6** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
 `scan_sessions.label`, v3 -> v4 added the `device_overrides` table, v4 -> v5 added
-`device_overrides.notes`; all auto-migrations, exported schemas live in `app/schemas/`).
+`device_overrides.notes`, v5 -> v6 added `scan_sessions.origin` with an `AutoMigrationSpec`
+that back-fills it from the old default labels; all auto-migrations, exported schemas live in
+`app/schemas/`).
+
+**Session names and origin**: `ScanSession.label` is user-editable ("Rename…" on the Sessions
+row menu and the pencil in session detail; `SessionManager.setLabel`). Provenance lives in
+`ScanSession.origin` (`LIVE`, `ESP32_IMPORT`, `FILE_IMPORT`, `RESTORE`), which is what the
+"Imported / Restored / no GPS" hints and `isImported` read; never infer it from the label.
+ESP32 imports still get a default label carrying memory/flash.
 
 **Per-device edits** (`data/DeviceOverride.kt`, keyed by normalised MAC so one edit covers every
 session that saw the device): corrected `latitude`/`longitude`, `alias`, `notes`, `hidden`.
@@ -178,7 +186,8 @@ data class DetectedDevice(
 @Entity(tableName = "scan_sessions")
 data class ScanSession(
     @PrimaryKey val id: String, val startedAt: Long, val endedAt: Long?,
-    val label: String?,                 // v3: "ESP32 import (flash)", "Imported (JSON)", ...
+    val label: String?,                 // v3: user-editable name; ESP32 imports default to "ESP32 import (flash)"
+    val origin: SessionOrigin,          // v6: LIVE | ESP32_IMPORT | FILE_IMPORT | RESTORE
 )
 ```
 
