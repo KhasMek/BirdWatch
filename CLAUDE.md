@@ -127,6 +127,11 @@ Room schema **v7** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 adde
 `device_overrides.notes`, v5 -> v6 added `scan_sessions.origin` with an `AutoMigrationSpec`
 that back-fills it from the old default labels, v6 -> v7 added `device_overrides.track` and the
 `sighting_samples` table; all auto-migrations, exported schemas live in `app/schemas/`).
+**Every schema change must bump the version, keep the old `N.json`, and get a case in
+`MigrationTest`** (instrumented; the schemas dir is an androidTest asset). The tests create a
+database at an old version with hand-inserted rows, migrate to the latest, and check the data
+including the v6 origin back-fill. Run them on the phone before suggesting a commit that touches
+an entity; CI does not run them (no emulator there).
 
 **Signal trails** (`data/SightingSample.kt`): a breadcrumb (phone position, time, RSSI) per kept
 sighting of a *tracked* device. Tracked = `AppSettings.trackAllSightings` (off by default) or the
@@ -394,6 +399,7 @@ commit points and messages but never run git.
 ./gradlew testDebugUnitTest      # JVM tests (classifier, parsers, exporters, Remote ID)
 ./gradlew installDebug           # dev device: Pixel 5 (redfin), Android 14, rooted
 ./gradlew lintDebug              # CI runs this too; run it before suggesting a commit
+./gradlew connectedDebugAndroidTest   # Room migration tests (app/src/androidTest/.../MigrationTest.kt); needs the phone attached
 ./gradlew assembleRelease        # minified "dev" build, debug-signed (for testing R8 on a device only)
 ./gradlew assembleRelease -PbirdwatchVersion=2026.09.1   # a real release: REQUIRES keystore.properties or the ANDROID_KEYSTORE_* env vars, else the build refuses to configure
 ```

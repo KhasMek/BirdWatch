@@ -121,6 +121,11 @@ android {
         compose = true
         buildConfig = true // BuildConfig.VERSION_NAME on the About screen
     }
+    sourceSets {
+        // The exported Room schemas double as test assets so MigrationTest can create a database
+        // at any old version and migrate it forward.
+        getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    }
     lint {
         // Fail CI on real errors, but don't let a deprecation warning block a build.
         abortOnError = true
@@ -179,6 +184,7 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing) // MigrationTestHelper against app/schemas
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
