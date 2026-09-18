@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditLocationAlt
@@ -29,12 +31,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -44,11 +47,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -60,6 +65,7 @@ import com.google.android.gms.maps.model.Dash
 import com.google.android.gms.maps.model.Gap
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.maps.android.compose.Circle
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -77,6 +83,7 @@ import com.khasmek.birdwatch.ui.components.coords
 import com.khasmek.birdwatch.ui.theme.DetectionColors
 import com.khasmek.birdwatch.util.Permissions
 import com.khasmek.birdwatch.util.TimeFormat
+import kotlinx.coroutines.launch
 
 /**
  * What the user tapped on the map: a device's own marker, or a Remote ID operator marker.
@@ -132,6 +139,7 @@ fun MapScreen(
 @Composable
 private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val hasLocationPermission = remember { Permissions.allEssentialGranted(context) }
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(39.5, -98.35), 3.5f) // continental US until we know better
@@ -180,13 +188,20 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
     val selectedPin = selection?.let { state.pin(it.macAddress) }
     LaunchedEffect(selection, selectedPin == null) { if (selection != null && selectedPin == null) selectionKey = null }
 
-    // Move mode: start by centring on the pin's current position, zoomed in enough to be precise.
+    // Move mode: start by centring on the pin's current position, zoomed in enough to be precise,
+    // and draw its trail so the strong-signal cluster is visible while placing the crosshair.
     val movingPin = movingMac?.let { mac -> state.pins.firstOrNull { it.macAddress == mac } }
     LaunchedEffect(movingMac) {
+        val mac = movingMac ?: return@LaunchedEffect
+        viewModel.showTrail(mac)
         val target = movingPin?.position ?: return@LaunchedEffect
         runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(target.toLatLng(), 18f)) }
     }
     if (movingMac != null && movingPin == null) movingMac = null
+
+    // Trail dots belong to a pin in the current scope; if that pin vanishes, drop the trail.
+    val trailPin = state.trailMac?.let { mac -> state.pins.firstOrNull { it.macAddress == mac } }
+    LaunchedEffect(state.trailMac, trailPin == null) { if (state.trailMac != null && trailPin == null) viewModel.showTrail(null) }
 
     Column(Modifier.fillMaxSize()) {
         MapHeader(state, viewModel, onShowHidden = { showHiddenList = true })
@@ -208,16 +223,51 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
                         }
                     }
                 }
+                // One device's signal trail: a dot where the phone was at each kept sighting, bigger
+                // and more solid the stronger the signal, so the cluster near the device stands out.
+                if (trailPin != null) {
+                    val base = DetectionColors.forCategory(trailPin.category)
+                    state.trail.forEach { s ->
+                        key(s.id) {
+                            val strength = ((s.rssi + 100).coerceIn(0, 60)) / 60f // 0 = -100 dBm, 1 = -40 dBm
+                            Circle(
+                                center = LatLng(s.latitude, s.longitude),
+                                radius = 3.0 + 9.0 * strength,
+                                fillColor = base.copy(alpha = 0.25f + 0.55f * strength),
+                                strokeColor = base.copy(alpha = 0.9f),
+                                strokeWidth = 2f,
+                                zIndex = 2f,
+                            )
+                        }
+                    }
+                    state.suggested?.let { sp ->
+                        Circle(
+                            center = sp.toLatLng(),
+                            radius = 6.0,
+                            fillColor = MaterialTheme.colorScheme.error.copy(alpha = 0.35f),
+                            strokeColor = MaterialTheme.colorScheme.error,
+                            strokeWidth = 3f,
+                            zIndex = 3f,
+                        )
+                    }
+                }
             }
 
             if (movingPin != null) {
                 MoveOverlay(
                     pin = movingPin,
                     hasFix = state.fix != null,
+                    suggested = state.suggested,
+                    trailPoints = state.trail.size,
                     onUseMyLocation = {
                         state.fix?.let { f ->
                             viewModel.setLocation(movingPin.macAddress, GeoPoint(f.latitude, f.longitude))
                             movingMac = null
+                        }
+                    },
+                    onUseSuggested = {
+                        state.suggested?.let { sp ->
+                            scope.launch { runCatching { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(sp.toLatLng(), 19f)) } }
                         }
                     },
                     onSave = {
@@ -237,6 +287,10 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
         PinSheet(
             pin = selectedPin,
             isOperator = selection.isOperator,
+            trailOn = state.trailMac == selectedPin.macAddress,
+            trailPoints = if (state.trailMac == selectedPin.macAddress) state.trail.size else 0,
+            trackAll = state.trackAll,
+            onTrail = { on -> viewModel.setTrailEnabled(selectedPin.macAddress, on) },
             onDismiss = { selectionKey = null },
             onMove = { movingMac = selectedPin.macAddress; selectionKey = null },
             onResetPin = { viewModel.clearLocation(selectedPin.macAddress) },
@@ -359,6 +413,18 @@ private fun MapHeader(state: MapUiState, viewModel: MapViewModel, onShowHidden: 
                     }
                 }
             }
+            // Which device's trail is drawn, with a way to clear it without reopening the sheet.
+            val trailPin = state.trailMac?.let { mac -> state.pins.firstOrNull { it.macAddress == mac } }
+            if (trailPin != null) {
+                Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    InputChip(
+                        selected = true,
+                        onClick = { viewModel.showTrail(null) },
+                        label = { Text("Trail: ${trailPin.alias ?: trailPin.latest.displayName} · ${state.trail.size} pts") },
+                        trailingIcon = { Icon(Icons.Default.Close, contentDescription = "Hide trail", modifier = Modifier.height(16.dp)) },
+                    )
+                }
+            }
         }
     }
     if (state.staleKey) {
@@ -379,7 +445,10 @@ private fun MapHeader(state: MapUiState, viewModel: MapViewModel, onShowHidden: 
 private fun MoveOverlay(
     pin: MapPin,
     hasFix: Boolean,
+    suggested: GeoPoint?,
+    trailPoints: Int,
     onUseMyLocation: () -> Unit,
+    onUseSuggested: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -404,16 +473,32 @@ private fun MoveOverlay(
             Column(Modifier.padding(12.dp)) {
                 Text("Move pin: ${pin.alias ?: pin.latest.displayName}", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "Pan the map until the crosshair sits on the device, then save. Every session that saw this device will use the new spot.",
+                    "Pan the map until the crosshair sits on the device, then save. Every session that saw this device will use the new spot." +
+                        when {
+                            suggested != null -> " The red ring is where $trailPoints signal readings say it is; \"Suggested spot\" jumps there."
+                            trailPoints > 0 -> " Its trail has $trailPoints points; a few more are needed for a suggested spot."
+                            else -> ""
+                        },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     OutlinedButton(onClick = onUseMyLocation, enabled = hasFix) {
                         Icon(Icons.Default.MyLocation, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("My location")
+                    }
+                    OutlinedButton(onClick = onUseSuggested, enabled = suggested != null) {
+                        Icon(Icons.Default.GpsFixed, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Suggested spot")
                     }
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = onCancel) { Text("Cancel") }
@@ -429,6 +514,10 @@ private fun MoveOverlay(
 private fun PinSheet(
     pin: MapPin,
     isOperator: Boolean,
+    trailOn: Boolean,
+    trailPoints: Int,
+    trackAll: Boolean,
+    onTrail: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onMove: () -> Unit,
     onResetPin: () -> Unit,
@@ -484,7 +573,36 @@ private fun PinSheet(
             }
             DeviceCard(device = device, now = System.currentTimeMillis(), initiallyExpanded = true, override = pin.override)
 
-            Spacer(Modifier.height(12.dp))
+            if (pin.canEdit) {
+                // Signal trail: shows the breadcrumbs and (unless every device is tracked already)
+                // starts recording them for this device from now on.
+                val recording = trackAll || pin.override?.track == true
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = trailOn, role = Role.Switch, onValueChange = onTrail)
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Signal trail", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            when {
+                                trailOn && trailPoints == 0 && recording -> "Recording. Points appear as the device is sighted with a GPS fix."
+                                trailOn -> "$trailPoints point${if (trailPoints == 1) "" else "s"} on the map; bigger dots mean a stronger signal."
+                                recording -> "Recorded${if (trackAll) " (all devices)" else ""}. Switch on to show it."
+                                else -> "Off. Switch on to record where this device is heard and estimate where it really is."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = trailOn, onCheckedChange = null)
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
             Row(
                 Modifier
                     .fillMaxWidth()

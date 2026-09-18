@@ -105,9 +105,48 @@ class SessionManager(
     private val mergedDevices: Flow<List<DetectedDevice>> =
         combine(bleScanner.devices, usbCompanion.devices, wifiApScanner.devices) { b, u, w -> SourceMerge.mergeAll(b + u + w) }
 
+    // ---- signal trails ----------------------------------------------------------------------
+
+    private val sampleDao get() = db.sightingSampleDao()
+
+    /** MACs with a per-device "track" flag; kept current from the overrides table. */
+    @Volatile
+    private var trackedMacs: Set<String> = emptySet()
+
+    @Volatile
+    private var trackAll: Boolean = settings.trackAllSightings.value
+
+    /** Last kept sample and running count per MAC for the running session (reset at start). */
+    private class TrailState(var lastTime: Long, var lat: Double, var lon: Double, var count: Int)
+    private val trails = HashMap<String, TrailState>()
+
+    /**
+     * Keep a breadcrumb for every tracked device that was re-sighted since its last kept sample,
+     * throttled by [SightingTrail.shouldSample] and capped. Runs on the 2 s flush; rows carry the
+     * phone's position at the latest sighting, which is exactly the breadcrumb we want.
+     */
+    private suspend fun sampleTrails(devices: List<DetectedDevice>, sessionId: String) {
+        if (!trackAll && trackedMacs.isEmpty()) return
+        val batch = mutableListOf<SightingSample>()
+        for (d in devices) {
+            if (!trackAll && d.macAddress !in trackedMacs) continue
+            val lat = d.latitude ?: continue
+            val lon = d.longitude ?: continue
+            val st = trails[d.macAddress]
+            if (st != null && (st.count >= SightingTrail.MAX_PER_DEVICE_PER_SESSION || d.lastSeen <= st.lastTime)) continue
+            if (!SightingTrail.shouldSample(st?.lastTime, st?.lat, st?.lon, d.lastSeen, lat, lon)) continue
+            batch += SightingSample(sessionId = sessionId, macAddress = d.macAddress, time = d.lastSeen, latitude = lat, longitude = lon, rssi = d.rssi)
+            if (st == null) trails[d.macAddress] = TrailState(d.lastSeen, lat, lon, 1)
+            else { st.lastTime = d.lastSeen; st.lat = lat; st.lon = lon; st.count++ }
+        }
+        if (batch.isNotEmpty()) sampleDao.insertAll(batch)
+    }
+
     init {
         // Any session left open by a crash/kill is closed now so it shows up in history.
         scope.launch { sessionDao.closeOpenSessions(System.currentTimeMillis()) }
+        scope.launch { db.deviceOverrideDao().observeAll().collect { list -> trackedMacs = list.filter { it.track }.map { it.macAddress }.toSet() } }
+        scope.launch { settings.trackAllSightings.collect { trackAll = it } }
         // The WiFi AP scan switch takes effect mid-session too. Under the mutex so a toggle cannot
         // land between stopSuspending() stopping the scanner and clearing the session.
         scope.launch {
@@ -152,6 +191,7 @@ class SessionManager(
         val fixSource = { locationProvider.currentFix() }
 
         synchronized(seenMacs) { seenMacs.clear() }
+        trails.clear()
         bleScanner.clear()
         bleScanner.sessionId = session.id
         bleScanner.locationSource = fixSource
@@ -260,6 +300,7 @@ class SessionManager(
         db.withTransaction {
             sessionDao.insert(session)
             if (parsed.devices.isNotEmpty()) detectionDao.upsertAll(parsed.devices)
+            BackupManager.restoreSamples(db, SessionBundle(session, parsed.devices, parsed.samples))
             edits = BackupManager.applyOverrides(db, parsed.overrides)
         }
         Log.i(TAG, "Imported session ${session.id} (${parsed.devices.size} devices, $edits edits) from ${parsed.format.label}")
@@ -283,6 +324,8 @@ class SessionManager(
             synchronized(seenMacs) { seenMacs.remove(mac) }
         }
         val removed = detectionDao.deleteDevice(mac, ids)
+        sampleDao.deleteForDevice(mac, ids)
+        trails.remove(mac)
         Log.i(TAG, "Deleted $removed detection(s) of $mac from ${ids.size} session(s)")
         removed
     }
@@ -300,6 +343,7 @@ class SessionManager(
         if (_currentSession.value?.id == sessionId) stopSuspending()
         db.withTransaction {
             detectionDao.deleteBySession(sessionId)
+            sampleDao.deleteBySession(sessionId)
             sessionDao.deleteById(sessionId)
         }
         Log.i(TAG, "Session $sessionId deleted")
@@ -311,10 +355,12 @@ class SessionManager(
     private suspend fun persistLoop() = coroutineScope {
         // A brand-new MAC lands immediately, already merged with anything another radio has on it.
         launch { newDetections.collect { detectionDao.upsert(mergedRowFor(it)) } }
-        // Re-sightings from every source, batched.
+        // Re-sightings from every source, batched; tracked devices also get a trail breadcrumb.
         launch {
             mergedDevices.sample(RESIGHT_FLUSH_MS).collect { devices ->
-                if (devices.isNotEmpty()) detectionDao.upsertAll(devices)
+                if (devices.isEmpty()) return@collect
+                detectionDao.upsertAll(devices)
+                _currentSession.value?.id?.let { sampleTrails(devices, it) }
             }
         }
     }

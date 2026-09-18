@@ -21,6 +21,9 @@ enum class ExportFormat(val extension: String, val mimeType: String, val label: 
 /** Per-MAC user edits to apply while exporting, keyed by normalised MAC. */
 typealias Overrides = Map<String, DeviceOverride>
 
+/** Signal-trail breadcrumbs of one session, keyed by normalised MAC (JSON only). */
+typealias Trails = Map<String, List<SightingSample>>
+
 /**
  * Pure serialisers for a session's detections. No Android dependencies; JVM-tested.
  * Field names follow the upstream Flask dashboard exports where they overlap
@@ -44,8 +47,9 @@ object ExportWriter {
         devices: List<DetectedDevice>,
         exportedAt: Long = System.currentTimeMillis(),
         overrides: Overrides = emptyMap(),
+        trails: Trails = emptyMap(),
     ): String = when (format) {
-        ExportFormat.JSON -> json(session, devices, exportedAt, overrides)
+        ExportFormat.JSON -> json(session, devices, exportedAt, overrides, trails)
         ExportFormat.CSV -> csv(devices, overrides)
         ExportFormat.KML -> kml(session, devices, overrides)
     }
@@ -61,12 +65,18 @@ object ExportWriter {
     // JSON
     // ------------------------------------------------------------------
 
-    fun json(session: ScanSession, devices: List<DetectedDevice>, exportedAt: Long, overrides: Overrides = emptyMap()): String {
+    fun json(
+        session: ScanSession,
+        devices: List<DetectedDevice>,
+        exportedAt: Long,
+        overrides: Overrides = emptyMap(),
+        trails: Trails = emptyMap(),
+    ): String {
         val root = buildJsonObject {
             put("app", "birdwatch")
             put("exported_at", iso(exportedAt))
             put("session", sessionObject(session, devices.size))
-            put("devices", buildJsonArray { devices.forEach { add(deviceObject(it, overrides[it.macAddress])) } })
+            put("devices", buildJsonArray { devices.forEach { add(deviceObject(it, overrides[it.macAddress], trails[it.macAddress])) } })
         }
         return json.encodeToString(JsonObject.serializer(), root)
     }
@@ -79,7 +89,7 @@ object ExportWriter {
         put("device_count", deviceCount)
     }
 
-    fun deviceObject(d: DetectedDevice, o: DeviceOverride? = null): JsonObject = buildJsonObject {
+    fun deviceObject(d: DetectedDevice, o: DeviceOverride? = null, trail: List<SightingSample>? = null): JsonObject = buildJsonObject {
         put("mac_address", d.macAddress)
         put("device_name", d.deviceName?.let { JsonPrimitive(it) } ?: JsonNull)
         o?.alias?.takeIf { it.isNotBlank() }?.let { put("alias", it) }
@@ -106,7 +116,17 @@ object ExportWriter {
                 put("detected_latitude", d.latitude?.let { JsonPrimitive(it) } ?: JsonNull)
                 put("detected_longitude", d.longitude?.let { JsonPrimitive(it) } ?: JsonNull)
                 put("hidden", o.hidden)
+                put("track", o.track)
                 put("updated_at", if (o.updatedAt > 0) JsonPrimitive(iso(o.updatedAt)) else JsonNull)
+            })
+        }
+        // Signal trail as compact rows: [time, latitude, longitude, rssi]. ("sightings" above is
+        // the count; this must not reuse that key.)
+        if (!trail.isNullOrEmpty()) {
+            put("trail", buildJsonArray {
+                trail.forEach { s ->
+                    add(buildJsonArray { add(JsonPrimitive(iso(s.time))); add(JsonPrimitive(s.latitude)); add(JsonPrimitive(s.longitude)); add(JsonPrimitive(s.rssi)) })
+                }
             })
         }
         if (d.isRemoteId) {
@@ -134,7 +154,7 @@ object ExportWriter {
         "operator_latitude", "operator_longitude",
         // user edits (v4): alias, whether latitude/longitude above is the user's correction, the
         // detected fix when it is, hidden flag, when the edit was made
-        "alias", "position_edited", "detected_latitude", "detected_longitude", "hidden", "edited_at", "notes",
+        "alias", "position_edited", "detected_latitude", "detected_longitude", "hidden", "edited_at", "notes", "track",
     )
 
     fun csv(devices: List<DetectedDevice>, overrides: Overrides = emptyMap()): String = buildString {
@@ -160,6 +180,7 @@ object ExportWriter {
         if (o?.hidden == true) "true" else "",
         if (o != null && !o.isEmpty && o.updatedAt > 0) iso(o.updatedAt) else "",
         o?.notes ?: "",
+        if (o?.track == true) "true" else "",
     ).joinToString(",") { csvCell(it) }
 
     // ------------------------------------------------------------------

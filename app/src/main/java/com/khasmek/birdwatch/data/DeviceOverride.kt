@@ -1,5 +1,6 @@
 package com.khasmek.birdwatch.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.PrimaryKey
@@ -29,11 +30,14 @@ data class DeviceOverride(
     val updatedAt: Long = 0L,
     /** Free text: "pole on the NE corner, facing south", "confirmed by eye 2026-09-14". */
     val notes: String? = null,
+    /** Keep a signal trail ([SightingSample]) for this device even when the global switch is off (v7). */
+    @ColumnInfo(defaultValue = "0")
+    val track: Boolean = false,
 ) {
     val hasLocation: Boolean get() = latitude != null && longitude != null
 
     /** True when every field is at its default, i.e. the row carries no information. */
-    val isEmpty: Boolean get() = !hasLocation && alias.isNullOrBlank() && !hidden && notes.isNullOrBlank()
+    val isEmpty: Boolean get() = !hasLocation && alias.isNullOrBlank() && !hidden && notes.isNullOrBlank() && !track
 }
 
 @Dao

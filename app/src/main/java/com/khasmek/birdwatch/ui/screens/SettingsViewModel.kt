@@ -28,6 +28,8 @@ data class SettingsUiState(
     val restartRequired: Boolean = false,
     val enabledPacks: Set<PackId> = emptySet(),
     val wifiApScan: Boolean = false,
+    /** Keep a signal trail for every device (off: only devices tracked from the map). */
+    val trackAllSightings: Boolean = false,
 ) {
     val hasKey: Boolean get() = !mapsApiKey.isNullOrBlank()
     val keyHint: String? get() = mapsApiKey?.let { "…" + it.takeLast(4) }
@@ -61,6 +63,7 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
         )
     }.combine(settings.wifiApScan) { s, wifi -> s.copy(wifiApScan = wifi) }
         .combine(settings.quietKnownAlerts) { s, quiet -> s.copy(quietKnownAlerts = quiet) }
+        .combine(settings.trackAllSightings) { s, track -> s.copy(trackAllSightings = track) }
         // Reactive, so the hint appears the moment a different key is saved and never disappears
         // while the SDK still holds the old one.
         .combine(MapsKeyInjector.keyInUse) { s, inUse ->
@@ -104,6 +107,12 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     fun setLowPowerScan(enabled: Boolean) = settings.setLowPowerScan(enabled)
     fun setPackEnabled(pack: PackId, enabled: Boolean) = settings.setPackEnabled(pack, enabled)
     fun setWifiApScan(enabled: Boolean) = settings.setWifiApScan(enabled)
+    fun setTrackAllSightings(enabled: Boolean) = settings.setTrackAllSightings(enabled)
+
+    /** Delete every stored trail point; the outcome goes to [onResult] for a toast. */
+    fun clearTrails(onResult: (String) -> Unit) {
+        viewModelScope.launch { onResult(container.deviceEditor.clearTrails()) }
+    }
     /** False if the tones are not ready yet (they are synthesised on first use). */
     fun playTestChirp(): Boolean = container.alertSounds.playTest()
 

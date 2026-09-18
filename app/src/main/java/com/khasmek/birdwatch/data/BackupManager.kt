@@ -47,8 +47,11 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
         val sessions = db.sessionDao().getAll()
         val bySession = db.detectionDao().getAll().groupBy { it.sessionId }
         val overrides = db.deviceOverrideDao().getAll().associateBy { it.macAddress }
+        val samplesBySession = if (format == ExportFormat.JSON) db.sightingSampleDao().getAll().groupBy { it.sessionId } else emptyMap()
         val bundles = sessions.map { s ->
-            SessionBundle(s, bySession[s.id].orEmpty().filter { it.deviceType.category in categories })
+            val devices = bySession[s.id].orEmpty().filter { it.deviceType.category in categories }
+            val macs = devices.map { it.macAddress }.toSet()
+            SessionBundle(s, devices, samplesBySession[s.id].orEmpty().filter { it.macAddress in macs })
         }.filter { it.devices.isNotEmpty() }
         BackupPayload(
             fileName = fileName,
@@ -92,6 +95,7 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
                     }
                 }
                 if (toWrite.isNotEmpty()) db.detectionDao().upsertAll(toWrite)
+                restoreSamples(db, b)
             }
             editsApplied = applyOverrides(db, filtered.overrides)
         }
@@ -103,14 +107,29 @@ class BackupManager(context: Context, private val db: DetectionDatabase) {
     suspend fun deleteAll() {
         db.withTransaction {
             db.detectionDao().deleteAll()
+            db.sightingSampleDao().deleteAll()
             db.sessionDao().deleteAll()
             db.deviceOverrideDao().deleteAll()
         }
-        Log.i(TAG, "All sessions, detections and device edits deleted")
+        Log.i(TAG, "All sessions, detections, trails and device edits deleted")
     }
 
     companion object {
         private const val TAG = "BirdWatch/Backup"
+
+        /**
+         * Insert a bundle's signal trails for devices that have none locally in that session.
+         * Trails are never merged point by point: the local trail wins if it exists.
+         */
+        suspend fun restoreSamples(db: DetectionDatabase, bundle: SessionBundle) {
+            if (bundle.samples.isEmpty()) return
+            val dao = db.sightingSampleDao()
+            bundle.samples.groupBy { it.macAddress }.forEach { (mac, rows) ->
+                if (dao.count(bundle.session.id, mac) == 0) {
+                    dao.insertAll(rows.map { it.copy(id = 0, sessionId = bundle.session.id) }.take(SightingTrail.MAX_PER_DEVICE_PER_SESSION))
+                }
+            }
+        }
 
         /**
          * Write the file's per-device edits, but never over a newer edit made on this phone: an

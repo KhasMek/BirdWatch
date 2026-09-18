@@ -56,7 +56,7 @@ phone's `WifiManager` scan for camera detection (it only sees APs, which cameras
 - **USB serial:** usb-serial-for-android (`com.github.mik3y:usb-serial-for-android`, JitPack) —
   CDC ACM, 115200 baud. Needs `android.hardware.usb.host` and a USB permission prompt. No root.
 - **GPS:** Play Services `FusedLocationProviderClient`, high accuracy while a session runs.
-- **Storage:** Room (KSP). Two tables: `detected_devices`, `scan_sessions`.
+- **Storage:** Room (KSP). Tables: `detected_devices`, `scan_sessions`, `device_overrides`, `sighting_samples`.
 - **Maps:** maps-compose + play-services-maps; built-in key in release builds, user override in Settings (see below).
 - **Export:** JSON, CSV, KML via FileProvider + share sheet.
 - **Audio:** SoundPool / ToneGenerator, built-in tones, no asset files.
@@ -98,9 +98,12 @@ app/src/main/java/com/khasmek/birdwatch/
 ├── wifi/WifiApScanner.kt          # Phone WiFi AP scan (third source; opt-in)
 ├── location/LocationProvider.kt   # FusedLocation wrapper; GeoFix; currentFix() for tagging
 ├── data/
-│   ├── DetectionDatabase.kt       # Room DB (v3, auto-migrations), schemas in app/schemas/
+│   ├── DetectionDatabase.kt       # Room DB (v7, auto-migrations), schemas in app/schemas/
 │   ├── DetectionDao.kt / SessionDao.kt / ScanSession.kt
-│   ├── SessionManager.kt          # Session lifecycle; merges sources; persists detections
+│   ├── DeviceOverride.kt          # Per-MAC user edits (pin, alias, notes, hidden, track) + DAO
+│   ├── SightingSample.kt          # Signal-trail breadcrumbs + DAO + pure SightingTrail maths
+│   ├── DeviceEditor.kt            # Shared edit/delete logic behind the map sheet and cards
+│   ├── SessionManager.kt          # Session lifecycle; merges sources; persists detections + trails
 │   ├── ExportWriter.kt / ExportReader.kt   # JSON/CSV/KML out, JSON/CSV back in (pure)
 │   ├── ExportManager.kt           # Writes to cache/exports and builds the share intent
 │   ├── Backup.kt / BackupManager.kt        # Multi-session backup, merge-on-restore, delete-all
@@ -119,11 +122,21 @@ app/src/main/java/com/khasmek/birdwatch/
 
 ## Data model
 
-Room schema **v6** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
+Room schema **v7** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
 `scan_sessions.label`, v3 -> v4 added the `device_overrides` table, v4 -> v5 added
 `device_overrides.notes`, v5 -> v6 added `scan_sessions.origin` with an `AutoMigrationSpec`
-that back-fills it from the old default labels; all auto-migrations, exported schemas live in
-`app/schemas/`).
+that back-fills it from the old default labels, v6 -> v7 added `device_overrides.track` and the
+`sighting_samples` table; all auto-migrations, exported schemas live in `app/schemas/`).
+
+**Signal trails** (`data/SightingSample.kt`): a breadcrumb (phone position, time, RSSI) per kept
+sighting of a *tracked* device. Tracked = `AppSettings.trackAllSightings` (off by default) or the
+device's `DeviceOverride.track`. `SessionManager.sampleTrails` runs on the 2 s flush, throttled by
+the pure `SightingTrail.shouldSample` (5 s or 15 m) and capped at 200 per device per session;
+rows go with their session on delete and with "Delete all data". The map draws one device's
+trail at a time (`MapViewModel.showTrail`; the sheet's "Signal trail" switch also sets `track`
+unless every device is tracked); `SightingTrail.suggestedPosition` (RSSI-weighted centroid)
+feeds the "Suggested spot" button in move mode. Trails travel in JSON exports and backups as
+`trail: [[time, lat, lon, rssi], ...]`, restored only where the (session, MAC) has none.
 
 **Session names and origin**: `ScanSession.label` is user-editable ("Rename…" on the Sessions
 row menu and the pencil in session detail; `SessionManager.setLabel`). Provenance lives in

@@ -10,8 +10,15 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 
-/** One session with its (possibly category-filtered) devices, the unit of a backup. */
-data class SessionBundle(val session: ScanSession, val devices: List<DetectedDevice>)
+/** One session with its (possibly category-filtered) devices and their signal trails, the unit of a backup. */
+data class SessionBundle(
+    val session: ScanSession,
+    val devices: List<DetectedDevice>,
+    val samples: List<SightingSample> = emptyList(),
+) {
+    /** Trail rows keyed by MAC, for the JSON writer. */
+    val trails: Trails get() = samples.groupBy { it.macAddress }
+}
 
 /**
  * Everything read from a backup file, ready for the restore dialog. [overrides] are the user's
@@ -28,10 +35,13 @@ data class ParsedBackup(
     val categoryCounts: Map<DeviceCategory, Int>
         get() = sessions.flatMap { it.devices }.groupingBy { it.deviceType.category }.eachCount()
 
-    /** Keep only [categories]; sessions left empty are dropped, as are edits for devices no longer included. */
+    /** Keep only [categories]; sessions left empty are dropped, as are edits and trails for devices no longer included. */
     fun filtered(categories: Set<DeviceCategory>): ParsedBackup {
-        val kept = sessions.map { b -> b.copy(devices = b.devices.filter { it.deviceType.category in categories }) }
-            .filter { it.devices.isNotEmpty() }
+        val kept = sessions.map { b ->
+            val devices = b.devices.filter { it.deviceType.category in categories }
+            val macs = devices.map { it.macAddress }.toSet()
+            b.copy(devices = devices, samples = b.samples.filter { it.macAddress in macs })
+        }.filter { it.devices.isNotEmpty() }
         val macs = kept.flatMap { b -> b.devices.map { it.macAddress } }.toSet()
         return copy(sessions = kept, overrides = overrides.filter { it.macAddress in macs })
     }
@@ -81,7 +91,7 @@ object BackupWriter {
                 bundles.forEach { b ->
                     add(buildJsonObject {
                         put("session", ExportWriter.sessionObject(b.session, b.devices.size))
-                        put("devices", buildJsonArray { b.devices.forEach { add(ExportWriter.deviceObject(it, overrides[it.macAddress])) } })
+                        put("devices", buildJsonArray { b.devices.forEach { add(ExportWriter.deviceObject(it, overrides[it.macAddress], b.trails[it.macAddress])) } })
                     })
                 }
             })
@@ -134,7 +144,7 @@ object BackupReader {
         if (kind != BackupWriter.KIND) {
             // A single-session export: wrap it.
             val single = ExportReader.parseJson(text)
-            return ParsedBackup(listOf(SessionBundle(single.session, single.devices)), ExportFormat.JSON, single.overrides)
+            return ParsedBackup(listOf(SessionBundle(single.session, single.devices, single.samples)), ExportFormat.JSON, single.overrides)
         }
         val entries = root["sessions"] as? JsonArray ?: throw ImportFormatException("Backup has no \"sessions\" array")
         val parsedAll = entries.mapIndexed { i, el ->
@@ -144,7 +154,7 @@ object BackupReader {
             ExportReader.parseJson(obj)
         }
         return ParsedBackup(
-            parsedAll.map { SessionBundle(it.session, it.devices) },
+            parsedAll.map { SessionBundle(it.session, it.devices, it.samples) },
             ExportFormat.JSON,
             ParsedBackup.mergeOverrides(parsedAll.flatMap { it.overrides }),
         )

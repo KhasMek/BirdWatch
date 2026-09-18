@@ -37,12 +37,21 @@ class AppSettings(context: Context) {
     /** Use the phone's WiFi radio to match access-point BSSIDs (third detection source). */
     val wifiApScan: StateFlow<Boolean> = _wifiApScan.asStateFlow()
 
+    private val _trackAllSightings = MutableStateFlow(prefs.getBoolean(KEY_TRACK_ALL, false))
+    /** Keep a signal trail for every device; off by default, trails are then per device from the map. */
+    val trackAllSightings: StateFlow<Boolean> = _trackAllSightings.asStateFlow()
+
     private val _mapHiddenCategories = MutableStateFlow(loadHiddenCategories())
     /** Categories switched off with the chips above the map; kept across launches. */
     val mapHiddenCategories: StateFlow<Set<DeviceCategory>> = _mapHiddenCategories.asStateFlow()
 
     val scanMode: Int
         get() = if (_lowPowerScan.value) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
+
+    fun setTrackAllSightings(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_TRACK_ALL, enabled) }
+        _trackAllSightings.value = enabled
+    }
 
     fun setMapCategoryHidden(category: DeviceCategory, hidden: Boolean) {
         val next = if (hidden) _mapHiddenCategories.value + category else _mapHiddenCategories.value - category
@@ -96,5 +105,6 @@ class AppSettings(context: Context) {
         const val KEY_PACKS = "enabled_packs"
         const val KEY_WIFI_AP = "wifi_ap_scan"
         const val KEY_MAP_HIDDEN = "map_hidden_categories"
+        const val KEY_TRACK_ALL = "track_all_sightings"
     }
 }

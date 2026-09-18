@@ -18,10 +18,11 @@ import com.khasmek.birdwatch.detection.DetectedDevice
  * v3 -> v4: new `device_overrides` table (per-MAC corrected position, alias, hidden flag).
  * v4 -> v5: nullable `notes` on `device_overrides`.
  * v5 -> v6: `origin` on `scan_sessions` (default LIVE), back-filled from the old default labels.
+ * v6 -> v7: `track` on `device_overrides` and the `sighting_samples` table (signal trails).
  */
 @Database(
-    entities = [DetectedDevice::class, ScanSession::class, DeviceOverride::class],
-    version = 6,
+    entities = [DetectedDevice::class, ScanSession::class, DeviceOverride::class, SightingSample::class],
+    version = 7,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
@@ -29,6 +30,7 @@ import com.khasmek.birdwatch.detection.DetectedDevice
         AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5),
         AutoMigration(from = 5, to = 6, spec = DetectionDatabase.OriginBackfill::class),
+        AutoMigration(from = 6, to = 7),
     ],
 )
 abstract class DetectionDatabase : RoomDatabase() {
@@ -36,6 +38,7 @@ abstract class DetectionDatabase : RoomDatabase() {
     abstract fun detectionDao(): DetectionDao
     abstract fun sessionDao(): SessionDao
     abstract fun deviceOverrideDao(): DeviceOverrideDao
+    abstract fun sightingSampleDao(): SightingSampleDao
 
     /**
      * Before v6 a session's provenance was only implied by the auto-generated label. Recover it

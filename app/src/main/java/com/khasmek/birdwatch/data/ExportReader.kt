@@ -29,6 +29,8 @@ data class ImportedSession(
     val devices: List<DetectedDevice>,
     val format: ExportFormat,
     val overrides: List<DeviceOverride> = emptyList(),
+    /** Signal-trail breadcrumbs (JSON only), already stamped with this session's id. */
+    val samples: List<SightingSample> = emptyList(),
 )
 
 class ImportFormatException(message: String) : Exception(message)
@@ -74,12 +76,24 @@ object ExportReader {
         val devicesArr = root["devices"] as? JsonArray ?: JsonArray(emptyList())
 
         val overrides = mutableListOf<DeviceOverride>()
+        val samples = mutableListOf<SightingSample>()
         val devices = devicesArr.mapIndexedNotNull { i, el ->
             val d = el as? JsonObject ?: return@mapIndexedNotNull null
             val mac = d.str("mac_address")?.takeIf { it.isNotBlank() }
                 ?: throw ImportFormatException("Device #${i + 1} has no mac_address")
             val rid = d["remote_id"] as? JsonObject
             val normalizedMac = DetectionTable.normalizeMac(mac)
+
+            // Signal trail rows: [time, latitude, longitude, rssi]; a malformed row is skipped.
+            (d["trail"] as? JsonArray)?.forEach { row ->
+                val a = row as? JsonArray ?: return@forEach
+                if (a.size < 4) return@forEach
+                val t = (a[0] as? JsonPrimitive)?.contentOrNull?.let { runCatching { epoch(it) }.getOrNull() } ?: return@forEach
+                val lat = (a[1] as? JsonPrimitive)?.doubleOrNull ?: return@forEach
+                val lon = (a[2] as? JsonPrimitive)?.doubleOrNull ?: return@forEach
+                val rssi = (a[3] as? JsonPrimitive)?.intOrNull ?: return@forEach
+                samples += SightingSample(sessionId = id, macAddress = normalizedMac, time = t, latitude = lat, longitude = lon, rssi = rssi)
+            }
 
             // User edits: the file's latitude/longitude are the corrected position when
             // position_edited; the detected fix is under user_edit. Undo that here.
@@ -96,6 +110,7 @@ object ExportReader {
                 hidden = edit?.let { (it["hidden"] as? JsonPrimitive)?.booleanOrNull } == true,
                 updatedAt = edit?.str("updated_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
                 notes = d.str("notes"),
+                track = edit?.let { (it["track"] as? JsonPrimitive)?.booleanOrNull } == true,
             )
             if (!override.isEmpty) overrides += override
 
@@ -138,6 +153,7 @@ object ExportReader {
             devices = devices,
             format = ExportFormat.JSON,
             overrides = overrides.distinctBy { it.macAddress },
+            samples = samples,
         )
     }
 
@@ -176,6 +192,7 @@ object ExportReader {
                 hidden = row(c, "hidden").equals("true", ignoreCase = true),
                 updatedAt = row(c, "edited_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
                 notes = row(c, "notes"),
+                track = row(c, "track").equals("true", ignoreCase = true),
             )
             if (!override.isEmpty) overrides += override
 

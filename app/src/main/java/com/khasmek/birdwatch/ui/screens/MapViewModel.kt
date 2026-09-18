@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.khasmek.birdwatch.AppContainer
 import com.khasmek.birdwatch.data.DeviceOverride
+import com.khasmek.birdwatch.data.SightingSample
+import com.khasmek.birdwatch.data.SightingTrail
 import com.khasmek.birdwatch.detection.DetectedDevice
 import com.khasmek.birdwatch.detection.DetectionTable
 import com.khasmek.birdwatch.detection.DeviceCategory
@@ -16,7 +18,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -72,7 +76,15 @@ data class MapUiState(
     val hidden: Set<DeviceCategory> = emptySet(),
     val sessionActive: Boolean = false,
     val fix: GeoFix? = null,
+    /** Device whose signal trail is drawn, and its breadcrumbs within the current scope. */
+    val trailMac: String? = null,
+    val trail: List<SightingSample> = emptyList(),
+    /** The global "keep a trail for every device" switch. */
+    val trackAll: Boolean = false,
 ) {
+    /** Signal-weighted estimate of where the trailed device is; null with too few points. */
+    val suggested: GeoPoint? = SightingTrail.suggestedPosition(trail)?.let { (lat, lon) -> GeoPoint(lat, lon) }
+
     val hasKey: Boolean get() = !apiKey.isNullOrBlank()
 
     /** One pin per MAC in scope, newest row first within each. */
@@ -107,6 +119,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     private val overrideDao = container.database.deviceOverrideDao()
 
     private val _scope = MutableStateFlow(MapScope.ALL_SESSIONS)
+    private val _trailMac = MutableStateFlow<String?>(null)
     private val _mapsReady = MutableStateFlow(MapsKeyInjector.isInitialized)
     private val _mapsInitFailed = MutableStateFlow(false)
 
@@ -123,6 +136,15 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private val mapsState = combine(_mapsReady, _mapsInitFailed, MapsKeyInjector.keyInUse) { ready, failed, inUse -> Triple(ready, failed, inUse) }
+
+    /** Breadcrumbs of the trailed device within the sessions the current scope shows for it. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val trail: Flow<List<SightingSample>> = combine(_trailMac, devices) { mac, devices ->
+        mac?.let { m -> m to devices.filter { it.macAddress == m }.map { it.sessionId }.distinct() }
+    }.distinctUntilChanged().flatMapLatest { key ->
+        if (key == null || key.second.isEmpty()) flowOf(emptyList())
+        else container.database.sightingSampleDao().observeForDevice(key.first, key.second)
+    }
 
     init {
         // "This session" only makes sense while one is running; fall back when it ends.
@@ -150,6 +172,9 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
         .combine(container.locationProvider.state) { s, loc -> s.copy(fix = loc.fix) }
         .combine(container.settings.mapHiddenCategories) { s, hidden -> s.copy(hidden = hidden) }
         .combine(overrideDao.observeAll()) { s, overrides -> s.copy(overrides = overrides.associateBy { it.macAddress }) }
+        .combine(_trailMac) { s, mac -> s.copy(trailMac = mac) }
+        .combine(trail) { s, t -> s.copy(trail = t) }
+        .combine(container.settings.trackAllSightings) { s, all -> s.copy(trackAll = all) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MapUiState())
 
     /** Inject the effective key into the Maps SDK. Safe to call on every entry to the map screen. */
@@ -166,6 +191,20 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     fun toggleCategory(category: DeviceCategory) {
         val settings = container.settings
         settings.setMapCategoryHidden(category, hidden = category !in settings.mapHiddenCategories.value)
+    }
+
+    // ---- signal trail -------------------------------------------------------------------------
+
+    /** Draw (or clear, null) one device's trail. */
+    fun showTrail(mac: String?) { _trailMac.value = mac }
+
+    /**
+     * The sheet's trail switch: on shows the trail and, unless every device is tracked already,
+     * starts recording this one; off hides it and stops recording (the global switch aside).
+     */
+    fun setTrailEnabled(mac: String, enabled: Boolean) {
+        _trailMac.value = if (enabled) mac else null
+        if (!container.settings.trackAllSightings.value) run { editor.setTracked(mac, enabled) }
     }
 
     // ---- per-device edits (shared DeviceEditor; outcome goes to messages) ---------------------

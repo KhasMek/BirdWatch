@@ -43,6 +43,20 @@ class DeviceEditor(private val db: DetectionDatabase, private val sessionManager
     suspend fun setHidden(mac: String, hidden: Boolean): String =
         edit(mac, if (hidden) "Hidden from the map" else "Shown on the map again") { it.copy(hidden = hidden) }
 
+    /** Start or stop keeping a signal trail for this device (the global switch overrides "off"). */
+    suspend fun setTracked(mac: String, tracked: Boolean): String =
+        edit(mac, if (tracked) "Recording this device's sightings" else "Stopped recording sightings") { it.copy(track = tracked) }
+
+    /** Drop every stored trail breadcrumb. The track flags stay. */
+    suspend fun clearTrails(): String {
+        val n = runCatching { db.sightingSampleDao().deleteAll() }
+            .onFailure { Log.e(TAG, "clear trails failed", it) }
+            .getOrDefault(0)
+        return if (n == 0) "No trail data to clear" else "Cleared $n trail point${if (n == 1) "" else "s"}"
+    }
+
+    suspend fun trailPointCount(): Int = db.sightingSampleDao().countAll()
+
     /** Remove this device's rows from [sessionIds]. */
     suspend fun deleteDetections(mac: String, sessionIds: Collection<String>): String {
         val n = runCatching { sessionManager.deleteDetections(mac, sessionIds) }

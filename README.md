@@ -218,6 +218,17 @@ the current session and all sessions with the chips above the map, and switch wh
 on or off with the second row of chips. In *All sessions* a device is one pin no matter how many
 times you drove past it.
 
+**Signal trails.** A device's pin is placed where the phone was on the *last* packet, which is
+often well past the device. Switch on *Signal trail* in a pin's sheet and BirdWatch records
+where the phone was and how strong the signal was at each sighting of that device, from then
+on, and draws them as dots: bigger and more solid the stronger the signal, so the cluster near
+the device stands out. With three or more points, *Move pin* offers a *Suggested spot*, the
+signal-weighted centre of the trail, which is usually much closer than the last-seen point. To
+record trails for every device from the start, turn on *Keep a signal trail for every device* in
+Settings; it is off by default because trails are the one thing that can grow with time (a few
+hundred points per device per session at most, deleted with their session, or all at once with
+*Clear all trail data*). Trails travel in JSON exports and backups.
+
 **Seen before.** A device that was already recorded in an earlier session gets a "seen N× before"
 tag on its card, and by default plays a short low tick instead of the chirp, so on a route you
 drive often only new hardware makes you look at the phone. The tick can be switched back to the

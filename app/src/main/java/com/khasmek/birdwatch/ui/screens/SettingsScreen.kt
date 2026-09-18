@@ -210,6 +210,22 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
 
+            SectionTitle("Signal trails")
+            ToggleRow(
+                title = "Keep a signal trail for every device",
+                subtitle = "Record where the phone was and how strong the signal was at each sighting, for every device, " +
+                    "so the map can show a device's trail and suggest where it really is. Off: only devices you " +
+                    "switch on from the map are recorded, from that moment on. Trails are small (a few hundred " +
+                    "points per device per session at most) and go when their session is deleted.",
+                checked = state.trackAllSightings,
+                onCheckedChange = viewModel::setTrackAllSightings,
+            )
+            TextButton(onClick = { viewModel.clearTrails(::toast) }) { Text("Clear all trail data") }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
             SectionTitle("Detection packs")
             Text(
                 "Flock cameras and Raven gunshot detectors are always on. These optional packs add other " +

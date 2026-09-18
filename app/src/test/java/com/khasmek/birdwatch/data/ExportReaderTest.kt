@@ -113,6 +113,26 @@ class ExportReaderTest {
     }
 
     @Test
+    fun `signal trail rows round-trip through json and are dropped by csv`() {
+        val trail = listOf(
+            SightingSample(sessionId = session.id, macAddress = flock.macAddress, time = 1_789_071_971_000L, latitude = 37.1231, longitude = -122.9871, rssi = -80),
+            SightingSample(sessionId = session.id, macAddress = flock.macAddress, time = 1_789_071_976_000L, latitude = 37.1234, longitude = -122.9876, rssi = -52),
+        )
+        val tracked = DeviceOverride(flock.macAddress, track = true, updatedAt = 1L)
+        val text = ExportWriter.json(session, listOf(flock), 0L, mapOf(tracked.macAddress to tracked), mapOf(flock.macAddress to trail))
+        val back = ExportReader.parse(text)
+        assertEquals(trail.map { it.copy(id = 0) }, back.samples)
+        assertEquals(true, back.overrides.single().track)
+        // The trail must not clobber the device's own fields (its key once collided with the sighting count).
+        assertEquals(flock.copy(latitude = back.devices[0].latitude, longitude = back.devices[0].longitude), back.devices[0])
+        assertEquals(12, back.devices[0].sightings)
+        // CSV keeps the track flag but not the trail.
+        val csv = ExportReader.parse(ExportWriter.csv(listOf(flock), mapOf(tracked.macAddress to tracked)))
+        assertEquals(true, csv.overrides.single().track)
+        assertTrue(csv.samples.isEmpty())
+    }
+
+    @Test
     fun `kml uses the alias and corrected position and drops hidden devices`() {
         val moved = DeviceOverride(flock.macAddress, latitude = 37.2, longitude = -122.9, alias = "Cam A", updatedAt = 1L)
         val hidden = DeviceOverride(raven.macAddress, hidden = true, updatedAt = 1L)
