@@ -95,6 +95,7 @@ object ExportReader {
                 alias = alias,
                 hidden = edit?.let { (it["hidden"] as? JsonPrimitive)?.booleanOrNull } == true,
                 updatedAt = edit?.str("updated_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
+                notes = d.str("notes"),
             )
             if (!override.isEmpty) overrides += override
 
@@ -174,6 +175,7 @@ object ExportReader {
                 alias = row(c, "alias"),
                 hidden = row(c, "hidden").equals("true", ignoreCase = true),
                 updatedAt = row(c, "edited_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
+                notes = row(c, "notes"),
             )
             if (!override.isEmpty) overrides += override
 

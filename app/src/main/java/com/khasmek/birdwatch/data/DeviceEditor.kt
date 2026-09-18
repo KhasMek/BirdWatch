@@ -27,6 +27,19 @@ class DeviceEditor(private val db: DetectionDatabase, private val sessionManager
         return edit(mac, if (clean == null) "Alias cleared" else "Alias set") { it.copy(alias = clean) }
     }
 
+    /** Alias and notes together, as the edit dialog saves them. */
+    suspend fun setDetails(mac: String, alias: String?, notes: String?): String {
+        val cleanAlias = alias?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
+        val done = when {
+            cleanAlias == null && cleanNotes == null -> "Alias and notes cleared"
+            cleanNotes == null -> "Alias saved"
+            cleanAlias == null -> "Notes saved"
+            else -> "Alias and notes saved"
+        }
+        return edit(mac, done) { it.copy(alias = cleanAlias, notes = cleanNotes) }
+    }
+
     suspend fun setHidden(mac: String, hidden: Boolean): String =
         edit(mac, if (hidden) "Hidden from the map" else "Shown on the map again") { it.copy(hidden = hidden) }
 

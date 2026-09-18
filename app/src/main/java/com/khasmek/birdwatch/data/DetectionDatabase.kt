@@ -14,15 +14,17 @@ import com.khasmek.birdwatch.detection.DetectedDevice
  * v1 -> v2: nullable Remote ID columns on `detected_devices` (uasId, operatorId, target*, operator*).
  * v2 -> v3: nullable `label` on `scan_sessions` (ESP32 imports).
  * v3 -> v4: new `device_overrides` table (per-MAC corrected position, alias, hidden flag).
+ * v4 -> v5: nullable `notes` on `device_overrides`.
  */
 @Database(
     entities = [DetectedDevice::class, ScanSession::class, DeviceOverride::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
     autoMigrations = [
         AutoMigration(from = 1, to = 2),
         AutoMigration(from = 2, to = 3),
         AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
     ],
 )
 abstract class DetectionDatabase : RoomDatabase() {

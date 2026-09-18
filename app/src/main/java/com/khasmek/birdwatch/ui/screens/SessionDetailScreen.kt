@@ -37,7 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.ui.appViewModel
-import com.khasmek.birdwatch.ui.components.AliasDialog
+import com.khasmek.birdwatch.ui.components.DeviceEditDialog
 import com.khasmek.birdwatch.ui.components.ConfirmDeleteDialog
 import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
@@ -67,11 +67,12 @@ fun SessionDetailScreen(
 
     aliasMac?.let { mac ->
         val device = state.devices.firstOrNull { it.macAddress == mac }
-        AliasDialog(
-            current = state.overrides[mac]?.alias,
+        DeviceEditDialog(
+            currentAlias = state.overrides[mac]?.alias,
+            currentNotes = state.overrides[mac]?.notes,
             detectedName = device?.displayName ?: mac,
             onDismiss = { aliasMac = null },
-            onSave = { viewModel.setAlias(mac, it); aliasMac = null },
+            onSave = { alias, notes -> viewModel.setDetails(mac, alias, notes); aliasMac = null },
         )
     }
     deleteMac?.let { mac ->

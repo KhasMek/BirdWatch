@@ -83,6 +83,7 @@ object ExportWriter {
         put("mac_address", d.macAddress)
         put("device_name", d.deviceName?.let { JsonPrimitive(it) } ?: JsonNull)
         o?.alias?.takeIf { it.isNotBlank() }?.let { put("alias", it) }
+        o?.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
         put("source", d.source.name)
         put("detection_method", d.detectionMethod.wireName)
         put("device_type", d.deviceType.name)
@@ -133,7 +134,7 @@ object ExportWriter {
         "operator_latitude", "operator_longitude",
         // user edits (v4): alias, whether latitude/longitude above is the user's correction, the
         // detected fix when it is, hidden flag, when the edit was made
-        "alias", "position_edited", "detected_latitude", "detected_longitude", "hidden", "edited_at",
+        "alias", "position_edited", "detected_latitude", "detected_longitude", "hidden", "edited_at", "notes",
     )
 
     fun csv(devices: List<DetectedDevice>, overrides: Overrides = emptyMap()): String = buildString {
@@ -158,6 +159,7 @@ object ExportWriter {
         if (o?.hasLocation == true) d.longitude?.let { fmt(it) } ?: "" else "",
         if (o?.hidden == true) "true" else "",
         if (o != null && !o.isEmpty && o.updatedAt > 0) iso(o.updatedAt) else "",
+        o?.notes ?: "",
     ).joinToString(",") { csvCell(it) }
 
     // ------------------------------------------------------------------
@@ -210,6 +212,7 @@ object ExportWriter {
             sb.appendLine("$indent  <TimeStamp><when>${iso(d.lastSeen)}</when></TimeStamp>")
             sb.appendLine("$indent  <description><![CDATA[")
             if (alias != null) sb.appendLine("$indent    <b>Detected name:</b> ${xml(d.displayName)}<br/>")
+            o?.notes?.takeIf { it.isNotBlank() }?.let { sb.appendLine("$indent    <b>Notes:</b> ${xml(it)}<br/>") }
             sb.appendLine("$indent    <b>MAC:</b> ${d.macAddress}<br/>")
             sb.appendLine("$indent    <b>Category:</b> ${d.deviceType.category.label}<br/>")
             sb.appendLine("$indent    <b>Source:</b> ${d.source.label}<br/>")

@@ -322,7 +322,7 @@ class SessionDetailViewModel(private val container: AppContainer, private val se
         viewModelScope.launch { sessionManager.deleteSession(sessionId) }
     }
 
-    fun setAlias(mac: String, alias: String?) = edit { editor.setAlias(mac, alias) }
+    fun setDetails(mac: String, alias: String?, notes: String?) = edit { editor.setDetails(mac, alias, notes) }
     fun toggleHidden(mac: String) = edit { editor.setHidden(mac, uiState.value.overrides[mac]?.hidden != true) }
     /** Remove the device from this session only. */
     fun deleteDetection(mac: String) = edit { editor.deleteDetections(mac, listOf(sessionId)) }

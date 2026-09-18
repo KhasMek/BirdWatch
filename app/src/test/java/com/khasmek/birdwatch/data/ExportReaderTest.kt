@@ -83,7 +83,10 @@ class ExportReaderTest {
 
     @Test
     fun `user edits travel in json and csv and the detected position comes back intact`() {
-        val moved = DeviceOverride(flock.macAddress, latitude = 37.2, longitude = -122.9, alias = "Cam at Main & 3rd", hidden = false, updatedAt = 1_789_073_000_000L)
+        val moved = DeviceOverride(
+            flock.macAddress, latitude = 37.2, longitude = -122.9, alias = "Cam at Main & 3rd", hidden = false,
+            updatedAt = 1_789_073_000_000L, notes = "Pole on the NE corner, facing south.\nConfirmed by eye.",
+        )
         val hiddenOnly = DeviceOverride(raven.macAddress, hidden = true, updatedAt = 1_789_073_500_000L)
         val overrides = mapOf(moved.macAddress to moved, hiddenOnly.macAddress to hiddenOnly)
 
@@ -99,6 +102,7 @@ class ExportReaderTest {
             assertEquals(37.2, m.latitude!!, 1e-6); assertEquals(-122.9, m.longitude!!, 1e-6)
             assertEquals("Cam at Main & 3rd", m.alias)
             assertEquals(moved.updatedAt, m.updatedAt)
+            assertEquals(moved.notes, m.notes) // multi-line notes survive JSON and quoted CSV
             assertEquals(hiddenOnly, byMac[raven.macAddress])
         }
         // The file itself shows the corrected position and the alias, for anything else reading it.

@@ -18,35 +18,57 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** Set or clear a device's alias. Shared by the map sheet and the device cards. */
+/**
+ * Set or clear a device's alias and notes. Shared by the map sheet and the device cards.
+ * [onSave] receives the raw field texts; the editor trims and treats blank as cleared.
+ */
 @Composable
-fun AliasDialog(current: String?, detectedName: String, onDismiss: () -> Unit, onSave: (String?) -> Unit) {
-    var text by rememberSaveable { mutableStateOf(current.orEmpty()) }
+fun DeviceEditDialog(
+    currentAlias: String?,
+    currentNotes: String?,
+    detectedName: String,
+    onDismiss: () -> Unit,
+    onSave: (alias: String?, notes: String?) -> Unit,
+) {
+    var alias by rememberSaveable { mutableStateOf(currentAlias.orEmpty()) }
+    var notes by rememberSaveable { mutableStateOf(currentNotes.orEmpty()) }
+    val hasSomething = !currentAlias.isNullOrBlank() || !currentNotes.isNullOrBlank()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Alias") },
+        title = { Text("Alias & notes") },
         text = {
             Column {
                 Text(
-                    "A name of your own for this device. The detected name ($detectedName) stays visible underneath.",
+                    "Your own name and notes for this device. The detected name ($detectedName) stays visible underneath. " +
+                        "Both travel with exports and backups.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
+                    value = alias,
+                    onValueChange = { alias = it },
                     singleLine = true,
                     label = { Text("Alias") },
                     placeholder = { Text("e.g. Camera at Main & 3rd") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    minLines = 3,
+                    maxLines = 6,
+                    label = { Text("Notes") },
+                    placeholder = { Text("e.g. pole on the NE corner, facing south; confirmed by eye") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(text) }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onSave(alias, notes) }) { Text("Save") } },
         dismissButton = {
             Row {
-                if (!current.isNullOrBlank()) TextButton(onClick = { onSave(null) }) { Text("Clear") }
+                if (hasSomething) TextButton(onClick = { onSave(null, null) }) { Text("Clear") }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },

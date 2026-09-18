@@ -56,7 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.R
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
-import com.khasmek.birdwatch.ui.components.AliasDialog
+import com.khasmek.birdwatch.ui.components.DeviceEditDialog
 import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
 import com.khasmek.birdwatch.ui.components.DeviceCardActions
@@ -83,11 +83,12 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
 
     aliasMac?.let { mac ->
         val device = state.devices.firstOrNull { it.macAddress == mac }
-        AliasDialog(
-            current = state.overrides[mac]?.alias,
+        DeviceEditDialog(
+            currentAlias = state.overrides[mac]?.alias,
+            currentNotes = state.overrides[mac]?.notes,
             detectedName = device?.displayName ?: mac,
             onDismiss = { aliasMac = null },
-            onSave = { viewModel.setAlias(mac, it); aliasMac = null },
+            onSave = { alias, notes -> viewModel.setDetails(mac, alias, notes); aliasMac = null },
         )
     }
     deleteMac?.let { mac ->

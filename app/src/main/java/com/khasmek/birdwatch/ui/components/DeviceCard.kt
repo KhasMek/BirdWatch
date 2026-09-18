@@ -164,6 +164,11 @@ fun DeviceCard(
                     if (override?.hasLocation == true) {
                         DetailRow("Pin placed at", coords(override.latitude!!, override.longitude!!))
                     }
+                    override?.notes?.takeIf { it.isNotBlank() }?.let { notes ->
+                        Spacer(Modifier.height(6.dp))
+                        Text("Notes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(notes, style = MaterialTheme.typography.bodyMedium)
+                    }
                     DetailRow("First seen", TimeFormat.clock(device.firstSeen))
                     DetailRow("Last seen", TimeFormat.clock(device.lastSeen))
                     DetailRow("Sightings", device.sightings.toString())
@@ -198,7 +203,7 @@ fun DeviceCard(
                                 OutlinedButton(onClick = actions.onAlias, contentPadding = ButtonDefaults.TextButtonContentPadding) {
                                     Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
-                                    Text(if (alias == null) "Set alias" else "Edit alias")
+                                    Text(if (alias == null && override?.notes.isNullOrBlank()) "Alias & notes" else "Edit details")
                                 }
                             }
                             if (actions.onToggleHidden != null) {

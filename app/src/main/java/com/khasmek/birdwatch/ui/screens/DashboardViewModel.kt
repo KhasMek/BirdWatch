@@ -172,7 +172,7 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
     /** One-line outcomes of edits, for the screen to toast. */
     val messages: Flow<String> = _messages.receiveAsFlow()
 
-    fun setAlias(mac: String, alias: String?) = edit { editor.setAlias(mac, alias) }
+    fun setDetails(mac: String, alias: String?, notes: String?) = edit { editor.setDetails(mac, alias, notes) }
     fun toggleHidden(mac: String) = edit { editor.setHidden(mac, uiState.value.overrides[mac]?.hidden != true) }
     /** Remove the device from the running session only. */
     fun deleteDetection(mac: String) = edit {

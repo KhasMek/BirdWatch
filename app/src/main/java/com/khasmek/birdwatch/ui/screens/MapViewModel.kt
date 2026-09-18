@@ -175,7 +175,7 @@ class MapViewModel(private val container: AppContainer) : ViewModel() {
     /** Pin the device at [point]; every session that saw this MAC now draws it there. */
     fun setLocation(mac: String, point: GeoPoint) = run { editor.setLocation(mac, point.latitude, point.longitude) }
     fun clearLocation(mac: String) = run { editor.clearLocation(mac) }
-    fun setAlias(mac: String, alias: String?) = run { editor.setAlias(mac, alias) }
+    fun setDetails(mac: String, alias: String?, notes: String?) = run { editor.setDetails(mac, alias, notes) }
     fun setHidden(mac: String, hidden: Boolean) = run { editor.setHidden(mac, hidden) }
 
     /** Remove this device's rows from [sessionIds] (the sessions its pin currently covers). */

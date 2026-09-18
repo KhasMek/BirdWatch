@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
  * pin. The detected rows are never altered: the corrected position lives here, the observed
  * one stays in `detected_devices`.
  *
- * Schema v4. A row with nothing set is equivalent to no row; callers delete it then.
+ * Schema v4 (v5 added `notes`). A row with nothing set is equivalent to no row; callers delete it then.
  */
 @Entity(tableName = "device_overrides")
 data class DeviceOverride(
@@ -27,11 +27,13 @@ data class DeviceOverride(
     /** Keep the data, drop the pin. */
     val hidden: Boolean = false,
     val updatedAt: Long = 0L,
+    /** Free text: "pole on the NE corner, facing south", "confirmed by eye 2026-09-14". */
+    val notes: String? = null,
 ) {
     val hasLocation: Boolean get() = latitude != null && longitude != null
 
     /** True when every field is at its default, i.e. the row carries no information. */
-    val isEmpty: Boolean get() = !hasLocation && alias.isNullOrBlank() && !hidden
+    val isEmpty: Boolean get() = !hasLocation && alias.isNullOrBlank() && !hidden && notes.isNullOrBlank()
 }
 
 @Dao

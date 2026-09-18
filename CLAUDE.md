@@ -119,12 +119,14 @@ app/src/main/java/com/khasmek/birdwatch/
 
 ## Data model
 
-Room schema **v4** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
-`scan_sessions.label`, v3 -> v4 added the `device_overrides` table; all auto-migrations,
-exported schemas live in `app/schemas/`).
+Room schema **v5** (v1 -> v2 added the nullable Remote ID columns, v2 -> v3 added
+`scan_sessions.label`, v3 -> v4 added the `device_overrides` table, v4 -> v5 added
+`device_overrides.notes`; all auto-migrations, exported schemas live in `app/schemas/`).
 
 **Per-device edits** (`data/DeviceOverride.kt`, keyed by normalised MAC so one edit covers every
-session that saw the device): corrected `latitude`/`longitude`, `alias`, `hidden`. Detected rows
+session that saw the device): corrected `latitude`/`longitude`, `alias`, `notes`, `hidden`.
+`DeviceEditor` (shared by map sheet, Dashboard and session-detail cards) writes them;
+`DeviceEditDialog` edits alias and notes together. Detected rows
 are never modified; the map applies the override on top. `MapViewModel` groups rows by MAC into
 `MapPin`s (one pin per device in "All sessions", at the override position if set, else the
 newest sighting), and the pin sheet offers Move pin (crosshair over the map centre), My
@@ -141,7 +143,7 @@ is on. Cards get a "seen N× before" tag from the live `observeSessionsPerMac()`
 the session being shown).
 
 Edits travel with the files: `ExportWriter` takes an `Overrides` map and writes the
-*corrected* position as `latitude`/`longitude`, adds `alias`, and (JSON) a `user_edit` object
+*corrected* position as `latitude`/`longitude`, adds `alias` and `notes`, and (JSON) a `user_edit` object
 with `position_edited`, `detected_latitude/longitude`, `hidden`, `updated_at` (CSV: the same as
 extra columns `alias`, `position_edited`, `detected_*`, `hidden`, `edited_at`). KML uses the
 alias and corrected point and omits hidden devices. `ExportReader` reverses this, so rows come

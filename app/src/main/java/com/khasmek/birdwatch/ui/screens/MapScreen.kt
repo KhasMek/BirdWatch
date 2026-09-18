@@ -69,7 +69,7 @@ import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.khasmek.birdwatch.detection.DeviceCategory
 import com.khasmek.birdwatch.ui.appViewModel
-import com.khasmek.birdwatch.ui.components.AliasDialog
+import com.khasmek.birdwatch.ui.components.DeviceEditDialog
 import com.khasmek.birdwatch.ui.components.DeleteDeviceDialog
 import com.khasmek.birdwatch.ui.components.DeviceCard
 import com.khasmek.birdwatch.ui.components.categoryIcon
@@ -248,11 +248,12 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
 
     aliasMac?.let { mac ->
         val pin = state.pins.firstOrNull { it.macAddress == mac }
-        AliasDialog(
-            current = pin?.alias,
+        DeviceEditDialog(
+            currentAlias = pin?.alias,
+            currentNotes = pin?.override?.notes,
             detectedName = pin?.latest?.displayName ?: mac,
             onDismiss = { aliasMac = null },
-            onSave = { viewModel.setAlias(mac, it); aliasMac = null },
+            onSave = { alias, notes -> viewModel.setDetails(mac, alias, notes); aliasMac = null },
         )
     }
 
@@ -502,7 +503,7 @@ private fun PinSheet(
                     OutlinedButton(onClick = onAlias) {
                         Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(if (pin.alias == null) "Set alias" else "Edit alias")
+                        Text(if (pin.alias == null && pin.override?.notes.isNullOrBlank()) "Alias & notes" else "Edit details")
                     }
                 }
                 OutlinedButton(onClick = onHide) {
