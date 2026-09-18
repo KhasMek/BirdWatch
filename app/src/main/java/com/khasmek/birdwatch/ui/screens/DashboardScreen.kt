@@ -24,7 +24,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +34,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -161,6 +164,15 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                             Icon(Icons.Default.Usb, contentDescription = if (state.usb.status == UsbStatus.ERROR) "Retry ESP32 connection" else "Connect ESP32")
                         }
                     }
+                    // List order: strongest signal first (highlighted) or most recent first.
+                    IconButton(onClick = viewModel::toggleSortOrder) {
+                        Icon(
+                            imageVector = if (state.strongestFirst) Icons.Default.SignalCellularAlt else Icons.Default.Schedule,
+                            contentDescription = if (state.strongestFirst) "Sorted by signal strength; switch to most recent first"
+                            else "Sorted by most recent; switch to strongest signal first",
+                            tint = if (state.strongestFirst) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        )
+                    }
                     IconButton(onClick = viewModel::toggleAudio) {
                         Icon(
                             imageVector = if (state.audioEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
@@ -220,14 +232,25 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                 )
             }
 
+            // Re-ranked at most every 10 s of the ticking clock so the list does not jump every second.
+            val ordered = remember(state, now / 10_000) { state.orderedDevices(now) }
             when {
                 state.devices.isEmpty() -> EmptyState(isActive = state.isActive, summary = state.listeningSummary)
-                state.visibleDevices.isEmpty() -> EmptyFilterState(state.filter!!) { viewModel.setFilter(null) }
+                ordered.isEmpty() -> EmptyFilterState(state.filter!!) { viewModel.setFilter(null) }
                 else -> LazyColumn(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items(state.visibleDevices, key = { it.macAddress }) { device ->
+                    if (state.strongestFirst) {
+                        item(key = "sort-hint") {
+                            Text(
+                                "Strongest signal first (devices heard in the last minute), then older ones by time.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    items(ordered, key = { it.macAddress }) { device ->
                         DeviceCard(
                             device = device,
                             now = now,

@@ -54,7 +54,22 @@ data class DashboardUiState(
     val overrides: Map<String, DeviceOverride> = emptyMap(),
     /** Sessions each MAC appears in, across the whole database (includes the running one). */
     val sessionsPerMac: Map<String, Int> = emptyMap(),
+    /** List order: strongest signal first, else most recently seen first. */
+    val strongestFirst: Boolean = false,
 ) {
+    /**
+     * The list in display order. "Strongest first" ranks devices heard in the last minute by
+     * signal, strongest at the top (what is closest when you pull over), and puts everything
+     * older below them by recency: a strong reading from ten minutes ago says nothing about now.
+     */
+    fun orderedDevices(now: Long): List<DetectedDevice> {
+        val visible = visibleDevices
+        if (!strongestFirst) return visible
+        val (live, stale) = visible.partition { now - it.lastSeen <= LIVE_WINDOW_MS }
+        return live.sortedWith(compareByDescending<DetectedDevice> { it.rssi }.thenByDescending { it.lastSeen }) +
+            stale.sortedByDescending { it.lastSeen }
+    }
+
     /** Earlier sessions that also saw [mac]: everything except the running one. */
     fun priorSessions(mac: String): Int = ((sessionsPerMac[mac] ?: 1) - 1).coerceAtLeast(0)
 
@@ -88,6 +103,11 @@ data class DashboardUiState(
             }
             location.error?.let { add(StatusMessage("GPS: $it", isError = true, action = StatusAction.APP_SETTINGS)) }
         }
+
+    companion object {
+        /** A device heard within this window counts as "here now" for strongest-first ordering. */
+        const val LIVE_WINDOW_MS = 60_000L
+    }
 
     private fun actionFor(issue: ScanIssue?): StatusAction? = when (issue) {
         ScanIssue.BLUETOOTH_OFF -> StatusAction.ENABLE_BLUETOOTH
@@ -163,7 +183,10 @@ class DashboardViewModel(private val container: AppContainer) : ViewModel() {
         s.copy(overrides = overrides.associateBy { it.macAddress })
     }.combine(container.database.detectionDao().observeSessionsPerMac()) { s, counts ->
         s.copy(sessionsPerMac = counts.associate { it.macAddress to it.sessions })
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
+    }.combine(container.settings.dashboardStrongestFirst) { s, strongest -> s.copy(strongestFirst = strongest) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardUiState())
+
+    fun toggleSortOrder() = container.settings.setDashboardStrongestFirst(!container.settings.dashboardStrongestFirst.value)
 
     // ---- per-device edits ----------------------------------------------------------------
 

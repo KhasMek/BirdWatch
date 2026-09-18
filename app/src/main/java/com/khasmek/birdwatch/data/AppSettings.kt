@@ -41,12 +41,21 @@ class AppSettings(context: Context) {
     /** Keep a signal trail for every device; off by default, trails are then per device from the map. */
     val trackAllSightings: StateFlow<Boolean> = _trackAllSightings.asStateFlow()
 
+    private val _dashboardStrongestFirst = MutableStateFlow(prefs.getBoolean(KEY_STRONGEST_FIRST, false))
+    /** Dashboard list order: strongest signal first (true) or most recently seen first (false). */
+    val dashboardStrongestFirst: StateFlow<Boolean> = _dashboardStrongestFirst.asStateFlow()
+
     private val _mapHiddenCategories = MutableStateFlow(loadHiddenCategories())
     /** Categories switched off with the chips above the map; kept across launches. */
     val mapHiddenCategories: StateFlow<Set<DeviceCategory>> = _mapHiddenCategories.asStateFlow()
 
     val scanMode: Int
         get() = if (_lowPowerScan.value) ScanSettings.SCAN_MODE_LOW_POWER else ScanSettings.SCAN_MODE_LOW_LATENCY
+
+    fun setDashboardStrongestFirst(enabled: Boolean) {
+        prefs.edit { putBoolean(KEY_STRONGEST_FIRST, enabled) }
+        _dashboardStrongestFirst.value = enabled
+    }
 
     fun setTrackAllSightings(enabled: Boolean) {
         prefs.edit { putBoolean(KEY_TRACK_ALL, enabled) }
@@ -106,5 +115,6 @@ class AppSettings(context: Context) {
         const val KEY_WIFI_AP = "wifi_ap_scan"
         const val KEY_MAP_HIDDEN = "map_hidden_categories"
         const val KEY_TRACK_ALL = "track_all_sightings"
+        const val KEY_STRONGEST_FIRST = "dashboard_strongest_first"
     }
 }
