@@ -339,8 +339,9 @@ Maps SDK API). It enters the build as `BIRDWATCH_MAPS_KEY` (CI secret `MAPS_API_
 the manifest `${mapsApiKey}` placeholder. **No literal key ever goes in source or the manifest.**
 A key the user enters in Settings (stored in `EncryptedSharedPreferences`) takes precedence:
 `MapsKeyInjector.effectiveKey(userKey)` picks, and the injector writes it into
-`ApplicationInfo.metaData` before the map loads. Builds without a key (debug, forks) show the
-"needs an API key" prompt. Help link: https://developers.google.com/maps/documentation/android-sdk/get-api-key
+`ApplicationInfo.metaData` before the map loads. The Settings "Google Maps" section is shown
+**only in builds without a built-in key** (debug, forks); release users never see a key field.
+The user-key path may be removed entirely later. Help link: https://developers.google.com/maps/documentation/android-sdk/get-api-key
 
 ## Phases
 

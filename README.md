@@ -142,9 +142,9 @@ SKU with an unlimited free cap), which is why one shared key is fine.
 
 You only need your own key if you **build from source**: a debug build is signed with your
 machine's certificate, which the project key is not restricted to, so the map shows grey tiles
-until you either add your debug certificate's SHA-1 to a key of your own or enter a key in
-Settings. A key entered in Settings is stored encrypted on the phone, never leaves it, and takes
-precedence over the built-in one.
+until you enter a key of your own. Builds without a built-in key show a *Google Maps* section
+in Settings for exactly this; release builds don't show it at all. A key entered there is stored
+encrypted on the phone and never leaves it.
 
 **Create the key**
 

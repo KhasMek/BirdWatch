@@ -92,74 +92,71 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            SectionTitle("Google Maps")
-            Text(
-                if (state.builtInKey) {
-                    "The map works out of the box with BirdWatch's own key, which is locked to this app and can only " +
-                        "draw maps. Enter a key here only if you want to use your own; it is stored encrypted on this " +
-                        "device and never leaves it."
-                } else {
+            // Only builds without a built-in key (debug, forks) need a key from the user. Release
+            // builds ship one, so their users never see this section at all.
+            if (!state.builtInKey) {
+                SectionTitle("Google Maps")
+                Text(
                     "This build has no built-in map key, so the map needs your own Google Maps API key " +
                         "(Maps SDK for Android). It is stored encrypted on this device and never leaves it. " +
-                        "Everything else works without one."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = keyInput,
-                onValueChange = { keyInput = it },
-                label = { Text(if (state.builtInKey) "Your own API key (optional)" else "API key") },
-                placeholder = { Text("AIza…") },
-                singleLine = true,
-                enabled = state.loaded,
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-                trailingIcon = {
-                    IconButton(onClick = { showKey = !showKey }) {
-                        Icon(
-                            imageVector = if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = if (showKey) "Hide key" else "Show key",
-                        )
-                    }
-                },
-                supportingText = {
-                    Text(
-                        when {
-                            !state.loaded -> "Loading…"
-                            state.restartRequired -> "Key changed. Restart the app for the map to use it."
-                            state.hasKey -> "Using your key (ends in ${state.keyHint})"
-                            state.builtInKey -> "Using the built-in key"
-                            else -> "No key saved"
+                        "Everything else works without one.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = keyInput,
+                    onValueChange = { keyInput = it },
+                    label = { Text("API key") },
+                    placeholder = { Text("AIza…") },
+                    singleLine = true,
+                    enabled = state.loaded,
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+                    trailingIcon = {
+                        IconButton(onClick = { showKey = !showKey }) {
+                            Icon(
+                                imageVector = if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = if (showKey) "Hide key" else "Show key",
+                            )
                         }
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { viewModel.saveMapsApiKey(keyInput, ::handle) },
-                    enabled = state.loaded && keyInput.trim() != state.mapsApiKey.orEmpty(),
-                ) { Text("Save key") }
-                OutlinedButton(
-                    onClick = { keyInput = ""; viewModel.clearMapsApiKey(::handle) },
-                    enabled = state.loaded && (state.hasKey || keyInput.isNotEmpty()),
-                ) { Text("Clear") }
-            }
-            TextButton(onClick = {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.HELP_URL))) }
-                    .onFailure { toast("No browser available to open ${SettingsViewModel.HELP_URL}") }
-            }) {
-                Text("How to get a Maps API key")
-                Spacer(Modifier.width(6.dp))
-                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.height(16.dp))
-            }
+                    },
+                    supportingText = {
+                        Text(
+                            when {
+                                !state.loaded -> "Loading…"
+                                state.restartRequired -> "Key changed. Restart the app for the map to use it."
+                                state.hasKey -> "Using your key (ends in ${state.keyHint})"
+                                else -> "No key saved"
+                            }
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.saveMapsApiKey(keyInput, ::handle) },
+                        enabled = state.loaded && keyInput.trim() != state.mapsApiKey.orEmpty(),
+                    ) { Text("Save key") }
+                    OutlinedButton(
+                        onClick = { keyInput = ""; viewModel.clearMapsApiKey(::handle) },
+                        enabled = state.loaded && (state.hasKey || keyInput.isNotEmpty()),
+                    ) { Text("Clear") }
+                }
+                TextButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SettingsViewModel.HELP_URL))) }
+                        .onFailure { toast("No browser available to open ${SettingsViewModel.HELP_URL}") }
+                }) {
+                    Text("How to get a Maps API key")
+                    Spacer(Modifier.width(6.dp))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.height(16.dp))
+                }
 
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
+            }
 
             SectionTitle("Alerts")
             ToggleRow(
