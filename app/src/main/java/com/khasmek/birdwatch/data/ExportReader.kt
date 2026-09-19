@@ -70,9 +70,10 @@ object ExportReader {
     fun parseJson(root: JsonObject): ImportedSession {
         val sessionObj = root["session"] as? JsonObject ?: throw ImportFormatException("JSON has no \"session\" object; not a BirdWatch export")
         val id = sessionObj.str("id")?.takeIf { it.isNotBlank() } ?: throw ImportFormatException("Session has no id")
+        if (!ImportSanitizer.isValidSessionId(id)) throw ImportFormatException("Session id is not valid")
         val startedAt = sessionObj.str("started_at")?.let(::epoch) ?: throw ImportFormatException("Session has no started_at")
         val endedAt = sessionObj.str("ended_at")?.let(::epoch)
-        val label = sessionObj.str("label")
+        val label = ImportSanitizer.text(sessionObj.str("label"), ImportSanitizer.MAX_LABEL)
         val devicesArr = root["devices"] as? JsonArray ?: JsonArray(emptyList())
 
         val overrides = mutableListOf<DeviceOverride>()
@@ -81,65 +82,74 @@ object ExportReader {
             val d = el as? JsonObject ?: return@mapIndexedNotNull null
             val mac = d.str("mac_address")?.takeIf { it.isNotBlank() }
                 ?: throw ImportFormatException("Device #${i + 1} has no mac_address")
+            if (!ImportSanitizer.isValidMac(mac)) throw ImportFormatException("Device #${i + 1} has an invalid mac_address")
             val rid = d["remote_id"] as? JsonObject
             val normalizedMac = DetectionTable.normalizeMac(mac)
 
-            // Signal trail rows: [time, latitude, longitude, rssi]; a malformed row is skipped.
+            // Signal trail rows: [time, latitude, longitude, rssi]; a malformed or off-planet row
+            // is skipped, and no device gets more than the app itself would ever record.
+            var kept = 0
             (d["trail"] as? JsonArray)?.forEach { row ->
+                if (kept >= SightingTrail.MAX_PER_DEVICE_PER_SESSION) return@forEach
                 val a = row as? JsonArray ?: return@forEach
                 if (a.size < 4) return@forEach
                 val t = (a[0] as? JsonPrimitive)?.contentOrNull?.let { runCatching { epoch(it) }.getOrNull() } ?: return@forEach
-                val lat = (a[1] as? JsonPrimitive)?.doubleOrNull ?: return@forEach
-                val lon = (a[2] as? JsonPrimitive)?.doubleOrNull ?: return@forEach
-                val rssi = (a[3] as? JsonPrimitive)?.intOrNull ?: return@forEach
+                val (lat, lon) = ImportSanitizer.coordinates((a[1] as? JsonPrimitive)?.doubleOrNull, (a[2] as? JsonPrimitive)?.doubleOrNull)
+                if (lat == null || lon == null) return@forEach
+                val rssi = ImportSanitizer.rssi((a[3] as? JsonPrimitive)?.intOrNull ?: return@forEach)
                 samples += SightingSample(sessionId = id, macAddress = normalizedMac, time = t, latitude = lat, longitude = lon, rssi = rssi)
+                kept++
             }
 
             // User edits: the file's latitude/longitude are the corrected position when
             // position_edited; the detected fix is under user_edit. Undo that here.
             val edit = d["user_edit"] as? JsonObject
             val positionEdited = edit?.let { (it["position_edited"] as? JsonPrimitive)?.booleanOrNull } == true
-            val alias = d.str("alias")
-            val detectedLat = if (positionEdited) edit?.dbl("detected_latitude") else d.dbl("latitude")
-            val detectedLon = if (positionEdited) edit?.dbl("detected_longitude") else d.dbl("longitude")
+            val (detectedLat, detectedLon) = ImportSanitizer.coordinates(
+                if (positionEdited) edit?.dbl("detected_latitude") else d.dbl("latitude"),
+                if (positionEdited) edit?.dbl("detected_longitude") else d.dbl("longitude"),
+            )
+            val (editLat, editLon) = if (positionEdited) ImportSanitizer.coordinates(d.dbl("latitude"), d.dbl("longitude")) else null to null
             val override = DeviceOverride(
                 macAddress = normalizedMac,
-                latitude = if (positionEdited) d.dbl("latitude") else null,
-                longitude = if (positionEdited) d.dbl("longitude") else null,
-                alias = alias,
+                latitude = editLat,
+                longitude = editLon,
+                alias = ImportSanitizer.text(d.str("alias"), ImportSanitizer.MAX_ALIAS),
                 hidden = edit?.let { (it["hidden"] as? JsonPrimitive)?.booleanOrNull } == true,
                 updatedAt = edit?.str("updated_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
-                notes = d.str("notes"),
+                notes = ImportSanitizer.text(d.str("notes"), ImportSanitizer.MAX_NOTES),
                 track = edit?.let { (it["track"] as? JsonPrimitive)?.booleanOrNull } == true,
             )
             if (!override.isEmpty) overrides += override
 
+            val (targetLat, targetLon) = ImportSanitizer.coordinates(rid?.dbl("target_latitude"), rid?.dbl("target_longitude"))
+            val (operatorLat, operatorLon) = ImportSanitizer.coordinates(rid?.dbl("operator_latitude"), rid?.dbl("operator_longitude"))
             DetectedDevice(
                 sessionId = id,
                 macAddress = normalizedMac,
                 source = enumOr(d.str("source"), DetectionSource.BLE),
-                deviceName = d.str("device_name"),
+                deviceName = ImportSanitizer.text(d.str("device_name"), ImportSanitizer.MAX_NAME),
                 detectionMethod = DetectionMethod.fromWireName(d.str("detection_method")),
                 deviceType = enumOr(d.str("device_type"), DeviceType.FLOCK),
                 confidence = enumOr(d.str("confidence"), Confidence.LOW),
-                matchedOn = d.str("matched_on") ?: "",
-                ravenFirmware = d.str("raven_fw"),
-                tier = d.int("detection_tier"),
-                channel = d.int("channel"),
-                rssi = d.int("rssi") ?: 0,
+                matchedOn = ImportSanitizer.text(d.str("matched_on"), ImportSanitizer.MAX_NAME) ?: "",
+                ravenFirmware = ImportSanitizer.text(d.str("raven_fw"), ImportSanitizer.MAX_ID_FIELD),
+                tier = ImportSanitizer.tier(d.int("detection_tier")),
+                channel = ImportSanitizer.channel(d.int("channel")),
+                rssi = ImportSanitizer.rssi(d.int("rssi")),
                 latitude = detectedLat,
                 longitude = detectedLon,
-                accuracyMeters = d.flt("gps_accuracy_m"),
+                accuracyMeters = ImportSanitizer.accuracyM(d.flt("gps_accuracy_m")),
                 firstSeen = d.str("first_seen")?.let(::epoch) ?: startedAt,
                 lastSeen = d.str("last_seen")?.let(::epoch) ?: startedAt,
-                sightings = (d.int("sightings") ?: 1).coerceAtLeast(1),
-                uasId = rid?.str("uas_id"),
-                operatorId = rid?.str("operator_id"),
-                targetLatitude = rid?.dbl("target_latitude"),
-                targetLongitude = rid?.dbl("target_longitude"),
-                targetAltitudeM = rid?.dbl("target_altitude_m"),
-                operatorLatitude = rid?.dbl("operator_latitude"),
-                operatorLongitude = rid?.dbl("operator_longitude"),
+                sightings = ImportSanitizer.sightings(d.int("sightings")),
+                uasId = ImportSanitizer.text(rid?.str("uas_id"), ImportSanitizer.MAX_ID_FIELD),
+                operatorId = ImportSanitizer.text(rid?.str("operator_id"), ImportSanitizer.MAX_ID_FIELD),
+                targetLatitude = targetLat,
+                targetLongitude = targetLon,
+                targetAltitudeM = ImportSanitizer.altitudeM(rid?.dbl("target_altitude_m")),
+                operatorLatitude = operatorLat,
+                operatorLongitude = operatorLon,
             )
         }.distinctBy { it.macAddress }
 
@@ -175,53 +185,64 @@ object ExportReader {
         val sessionIds = rows.mapNotNull { row(it, "session_id") }.distinct()
         if (sessionIds.size != 1) throw ImportFormatException("CSV must contain exactly one session (found ${sessionIds.size})")
         val id = sessionIds.single()
+        if (!ImportSanitizer.isValidSessionId(id)) throw ImportFormatException("Session id is not valid")
 
         val overrides = mutableListOf<DeviceOverride>()
         val devices = rows.mapIndexed { i, c ->
             val mac = row(c, "mac_address") ?: throw ImportFormatException("Row ${i + 2} has no mac_address")
+            if (!ImportSanitizer.isValidMac(mac)) throw ImportFormatException("Row ${i + 2} has an invalid mac_address")
             val normalizedMac = DetectionTable.normalizeMac(mac)
+            fun dbl(name: String) = row(c, name)?.toDoubleOrNull()
+            fun int(name: String) = row(c, name)?.toIntOrNull()
 
             // User edits (see ExportWriter.CSV_HEADER): latitude/longitude are the correction when
             // position_edited is set, and the detected fix is in detected_*.
             val positionEdited = row(c, "position_edited").equals("true", ignoreCase = true)
+            val (editLat, editLon) = if (positionEdited) ImportSanitizer.coordinates(dbl("latitude"), dbl("longitude")) else null to null
             val override = DeviceOverride(
                 macAddress = normalizedMac,
-                latitude = if (positionEdited) row(c, "latitude")?.toDoubleOrNull() else null,
-                longitude = if (positionEdited) row(c, "longitude")?.toDoubleOrNull() else null,
-                alias = row(c, "alias"),
+                latitude = editLat,
+                longitude = editLon,
+                alias = ImportSanitizer.text(row(c, "alias"), ImportSanitizer.MAX_ALIAS),
                 hidden = row(c, "hidden").equals("true", ignoreCase = true),
                 updatedAt = row(c, "edited_at")?.let { runCatching { epoch(it) }.getOrDefault(0L) } ?: 0L,
-                notes = row(c, "notes"),
+                notes = ImportSanitizer.text(row(c, "notes"), ImportSanitizer.MAX_NOTES),
                 track = row(c, "track").equals("true", ignoreCase = true),
             )
             if (!override.isEmpty) overrides += override
 
+            val (lat, lon) = ImportSanitizer.coordinates(
+                dbl(if (positionEdited) "detected_latitude" else "latitude"),
+                dbl(if (positionEdited) "detected_longitude" else "longitude"),
+            )
+            val (targetLat, targetLon) = ImportSanitizer.coordinates(dbl("target_latitude"), dbl("target_longitude"))
+            val (operatorLat, operatorLon) = ImportSanitizer.coordinates(dbl("operator_latitude"), dbl("operator_longitude"))
             DetectedDevice(
                 sessionId = id,
                 macAddress = normalizedMac,
                 source = enumOr(row(c, "source"), DetectionSource.BLE),
-                deviceName = row(c, "device_name"),
+                deviceName = ImportSanitizer.text(row(c, "device_name"), ImportSanitizer.MAX_NAME),
                 detectionMethod = DetectionMethod.fromWireName(row(c, "detection_method")),
                 deviceType = enumOr(row(c, "device_type"), DeviceType.FLOCK),
                 confidence = enumOr(row(c, "confidence"), Confidence.LOW),
-                matchedOn = row(c, "matched_on") ?: "",
-                ravenFirmware = row(c, "raven_fw"),
-                tier = row(c, "detection_tier")?.toIntOrNull(),
-                channel = row(c, "channel")?.toIntOrNull(),
-                rssi = row(c, "rssi")?.toIntOrNull() ?: 0,
-                latitude = row(c, if (positionEdited) "detected_latitude" else "latitude")?.toDoubleOrNull(),
-                longitude = row(c, if (positionEdited) "detected_longitude" else "longitude")?.toDoubleOrNull(),
-                accuracyMeters = row(c, "gps_accuracy_m")?.toFloatOrNull(),
+                matchedOn = ImportSanitizer.text(row(c, "matched_on"), ImportSanitizer.MAX_NAME) ?: "",
+                ravenFirmware = ImportSanitizer.text(row(c, "raven_fw"), ImportSanitizer.MAX_ID_FIELD),
+                tier = ImportSanitizer.tier(int("detection_tier")),
+                channel = ImportSanitizer.channel(int("channel")),
+                rssi = ImportSanitizer.rssi(int("rssi")),
+                latitude = lat,
+                longitude = lon,
+                accuracyMeters = ImportSanitizer.accuracyM(row(c, "gps_accuracy_m")?.toFloatOrNull()),
                 firstSeen = row(c, "first_seen")?.let(::epoch) ?: throw ImportFormatException("Row ${i + 2} has no first_seen"),
                 lastSeen = row(c, "last_seen")?.let(::epoch) ?: throw ImportFormatException("Row ${i + 2} has no last_seen"),
-                sightings = (row(c, "sightings")?.toIntOrNull() ?: 1).coerceAtLeast(1),
-                uasId = row(c, "uas_id"),
-                operatorId = row(c, "operator_id"),
-                targetLatitude = row(c, "target_latitude")?.toDoubleOrNull(),
-                targetLongitude = row(c, "target_longitude")?.toDoubleOrNull(),
-                targetAltitudeM = row(c, "target_altitude_m")?.toDoubleOrNull(),
-                operatorLatitude = row(c, "operator_latitude")?.toDoubleOrNull(),
-                operatorLongitude = row(c, "operator_longitude")?.toDoubleOrNull(),
+                sightings = ImportSanitizer.sightings(int("sightings")),
+                uasId = ImportSanitizer.text(row(c, "uas_id"), ImportSanitizer.MAX_ID_FIELD),
+                operatorId = ImportSanitizer.text(row(c, "operator_id"), ImportSanitizer.MAX_ID_FIELD),
+                targetLatitude = targetLat,
+                targetLongitude = targetLon,
+                targetAltitudeM = ImportSanitizer.altitudeM(dbl("target_altitude_m")),
+                operatorLatitude = operatorLat,
+                operatorLongitude = operatorLon,
             )
         }.distinctBy { it.macAddress }
 

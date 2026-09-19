@@ -58,8 +58,9 @@ object ExportWriter {
     fun effectiveLatitude(d: DetectedDevice, o: DeviceOverride?): Double? = if (o?.hasLocation == true) o.latitude else d.latitude
     fun effectiveLongitude(d: DetectedDevice, o: DeviceOverride?): Double? = if (o?.hasLocation == true) o.longitude else d.longitude
 
+    /** Session ids are validated on import, but the file name must be safe whatever the id holds. */
     fun fileName(format: ExportFormat, session: ScanSession): String =
-        "birdwatch_${isoCompact(session.startedAt)}_${session.id.take(8)}.${format.extension}"
+        "birdwatch_${isoCompact(session.startedAt)}_${ImportSanitizer.fileNameFragment(session.id)}.${format.extension}"
 
     // ------------------------------------------------------------------
     // JSON

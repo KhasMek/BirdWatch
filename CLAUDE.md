@@ -120,6 +120,19 @@ app/src/main/java/com/khasmek/birdwatch/
 └── util/                          # Permissions, TimeFormat, MapsKeyInjector, Diagnostics(+Report), CrashRecorder
 ```
 
+**Untrusted input** (`data/ImportSanitizer.kt`): everything from an import / restore file and
+from the ESP32 serial line goes through value validation on top of the type checks the readers
+already do. MACs must match `xx:xx:xx:xx:xx:xx` (a bad one refuses the file, or drops the serial
+line); session ids are `[A-Za-z0-9._-]{1,64}` (and `ExportWriter.fileName` never trusts them
+anyway); coordinates must be on the planet or the pair is dropped; RSSI / tier / channel /
+sightings / accuracy / altitude are clamped or nulled; free text is trimmed, stripped of control
+characters, and capped (name 256, alias 120, notes 4000, label 120); trail rows are capped per
+device. File type is decided by content, never by extension: `<` is refused as KML and no XML
+parser exists in the app. `SessionsViewModel.runBusy` catches `Throwable` so an OOM or stack
+overflow from a hostile file ends as a toast. Import files are capped at 25 MB before reading.
+`ImportHostileInputTest` and the parser tests pin all of this: add a case there for any new
+field read from outside.
+
 **Diagnostics** (`util/Diagnostics.kt`, `DiagnosticsReport.kt`, `CrashRecorder.kt`): Settings >
 "Copy diagnostics" builds a clipboard report of versions, states and counts, plus the last
 uncaught exception, which `CrashRecorder` (installed in `BirdWatchApp.onCreate`) writes to

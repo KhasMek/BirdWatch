@@ -72,7 +72,9 @@ class ExportReaderTest {
         val nasty = raven.copy(deviceName = "Line one\nline \"two\", still\r\nthree", matchedOn = "a,b")
         val back = ExportReader.parse(ExportWriter.csv(listOf(flock, nasty)), "x.csv")
         assertEquals(2, back.devices.size)
-        assertEquals(nasty, back.devices.first { it.macAddress == nasty.macAddress })
+        // The quoted cell survives the tokenizer intact; the import sanitizer then drops the bare
+        // carriage return (a control character), which is the one intended difference.
+        assertEquals(nasty.copy(deviceName = "Line one\nline \"two\", still\nthree"), back.devices.first { it.macAddress == nasty.macAddress })
     }
 
     @Test

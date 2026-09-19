@@ -237,9 +237,16 @@ class SessionsViewModel(private val container: AppContainer, private val savedSt
                 block()
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: a hostile file can exhaust memory or the stack, and
+                // either should end as a toast, not a crash.
                 if (e !is ImportFormatException && e !is SessionManager.AlreadyImportedException) Log.e(TAG, failPrefix, e)
-                "$failPrefix: ${e.message ?: e::class.simpleName}"
+                val reason = when (e) {
+                    is OutOfMemoryError -> "the file is too large to process"
+                    is StackOverflowError -> "the file is malformed"
+                    else -> e.message ?: e::class.simpleName
+                }
+                "$failPrefix: $reason"
             } finally {
                 work.update { it.copy(busy = false) }
             }
@@ -277,7 +284,8 @@ class SessionsViewModel(private val container: AppContainer, private val savedSt
 
     private companion object {
         const val TAG = "BirdWatch/Sessions"
-        const val MAX_IMPORT_BYTES = 50 * 1024 * 1024
+        /** A real backup is a few MB; the parsed JSON tree is several times the file size. */
+        const val MAX_IMPORT_BYTES = 25 * 1024 * 1024
         const val KEY_SAVE_CATEGORIES = "save_categories"
         const val KEY_SAVE_FORMAT = "save_format"
         const val KEY_SAVE_FILE = "save_file"
