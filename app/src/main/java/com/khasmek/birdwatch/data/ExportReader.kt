@@ -17,7 +17,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import java.time.Instant
-import java.time.format.DateTimeParseException
+import java.time.DateTimeException
 
 /**
  * A session reconstructed from one of BirdWatch's own export files, plus any per-device edits
@@ -74,6 +74,7 @@ object ExportReader {
         val startedAt = sessionObj.str("started_at")?.let(::epoch) ?: throw ImportFormatException("Session has no started_at")
         val endedAt = sessionObj.str("ended_at")?.let(::epoch)
         val label = ImportSanitizer.text(sessionObj.str("label"), ImportSanitizer.MAX_LABEL)
+        val origin = enumOr(sessionObj.str("origin"), SessionOrigin.LIVE)
         val devicesArr = root["devices"] as? JsonArray ?: JsonArray(emptyList())
 
         val overrides = mutableListOf<DeviceOverride>()
@@ -159,6 +160,7 @@ object ExportReader {
                 startedAt = startedAt,
                 endedAt = endedAt ?: (devices.maxOfOrNull { it.lastSeen } ?: startedAt),
                 label = label,
+                origin = origin,
             ),
             devices = devices,
             format = ExportFormat.JSON,
@@ -179,7 +181,10 @@ object ExportReader {
         val required = listOf("session_id", "mac_address", "detection_method", "device_type", "rssi", "first_seen", "last_seen")
         required.firstOrNull { it !in col }?.let { throw ImportFormatException("CSV is missing the \"$it\" column; not a BirdWatch export") }
 
-        fun row(cells: List<String>, name: String): String? = col[name]?.let { cells.getOrNull(it) }?.takeIf { it.isNotEmpty() }
+        // A leading apostrophe is the writer's spreadsheet-formula guard (see ExportWriter.csvCell);
+        // it is never part of the value.
+        fun row(cells: List<String>, name: String): String? =
+            col[name]?.let { cells.getOrNull(it) }?.removePrefix("'")?.takeIf { it.isNotEmpty() }
 
         if (rows.isEmpty()) throw ImportFormatException("CSV has a header but no rows")
         val sessionIds = rows.mapNotNull { row(it, "session_id") }.distinct()
@@ -294,10 +299,23 @@ object ExportReader {
         return records
     }
 
-    private fun epoch(iso: String): Long = try {
-        Instant.parse(iso.trim()).toEpochMilli()
-    } catch (e: DateTimeParseException) {
-        throw ImportFormatException("Bad timestamp \"$iso\"")
+    /**
+     * ISO-8601 to epoch millis. `Instant.parse` accepts years up to ±1 000 000 000, whose millis
+     * overflow a Long (ArithmeticException), and other malformed input raises DateTimeException
+     * subclasses; all of them become one import error. Anything before the epoch or after 2200
+     * is refused too: the app never wrote such a timestamp, and it would put the session at the
+     * end of every list forever.
+     */
+    private fun epoch(iso: String): Long {
+        val ms = try {
+            Instant.parse(iso.trim()).toEpochMilli()
+        } catch (e: DateTimeException) {
+            throw ImportFormatException("Bad timestamp \"$iso\"")
+        } catch (e: ArithmeticException) {
+            throw ImportFormatException("Bad timestamp \"$iso\"")
+        }
+        if (ms !in ImportSanitizer.MIN_EPOCH_MS..ImportSanitizer.MAX_EPOCH_MS) throw ImportFormatException("Timestamp \"$iso\" is out of range")
+        return ms
     }
 
     private inline fun <reified E : Enum<E>> enumOr(name: String?, fallback: E): E =

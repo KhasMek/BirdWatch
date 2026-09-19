@@ -15,6 +15,17 @@ enum class SessionOrigin(val label: String) {
     FILE_IMPORT("Imported"),
     /** Added by "Restore…" from a backup. */
     RESTORE("Restored"),
+    ;
+
+    companion object {
+        /**
+         * Origin for a session read from a file: an ESP32 import stays one (it explains the
+         * missing GPS and the anchored timestamps); anything else becomes [fallback], because a
+         * file is never a live scan on this phone.
+         */
+        fun importedFrom(declared: SessionOrigin?, fallback: SessionOrigin): SessionOrigin =
+            if (declared == ESP32_IMPORT) ESP32_IMPORT else fallback
+    }
 }
 
 /** One scan session: from the user pressing start until stop (or the app dying), or an import. */

@@ -59,7 +59,7 @@ data class UsbState(
     val detectionsReceived: Long = 0,
     /** Last `config` line from the firmware (beep mask, OUI count, tiers). */
     val config: FirmwareMessage.Config? = null,
-    /** Last `[flockyou] ...` banner, useful as a heartbeat ("scanning (ch=6 ...)"). */
+    /** Last `[flockyou] scanning ...` heartbeat line only; detection lines are never stored here. */
     val lastText: String? = null,
 ) {
     val isConnected: Boolean get() = status == UsbStatus.CONNECTED
@@ -363,9 +363,14 @@ class UsbCompanion(context: Context, private val scope: CoroutineScope) {
                 Log.i(TAG, "config: beepMask=${msg.beepMask} ouiCount=${msg.ouiCount}")
                 _state.update { it.copy(config = msg) }
             }
-            is FirmwareMessage.Text -> _state.update { it.copy(lastText = msg.line) }
+            // Only the scanning heartbeat is kept. The firmware also prints a plain-text line per
+            // detection ("[flockyou] DETECT-OUI mac=... oui=..."); that must never sit in state that
+            // the diagnostics report or anything else might surface.
+            is FirmwareMessage.Text -> if (msg.line.contains("scanning", ignoreCase = true) && !msg.line.contains("DETECT")) {
+                _state.update { it.copy(lastText = msg.line) }
+            }
             is FirmwareMessage.Unknown -> Log.d(TAG, "unknown line: ${msg.line}")
-            else -> Unit // session dump messages are handled by a future import feature
+            else -> Unit // session dump messages are consumed by dumpSession() via the messages flow
         }
     }
 

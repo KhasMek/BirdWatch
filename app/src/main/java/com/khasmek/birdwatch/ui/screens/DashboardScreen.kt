@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.khasmek.birdwatch.R
@@ -142,9 +143,11 @@ fun DashboardScreen(viewModel: DashboardViewModel = appViewModel { DashboardView
                         Text(stringResource(R.string.app_name))
                         state.session?.let {
                             Text(
-                                text = "Session ${TimeFormat.duration(it.durationMillis(now))}",
+                                text = "${it.label ?: "Session"} · ${TimeFormat.duration(it.durationMillis(now))}",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }

@@ -105,9 +105,10 @@ fun PreviousSessionScreen(
 
     // Outcomes of the long-running operations arrive here, whenever they finish.
     LaunchedEffect(Unit) { viewModel.messages.collect { toast(it) } }
-    // Counts feed the Back up / Delete all dialogs; keep them current so a dialog never opens on
-    // zeros. The summaries flow changes with every write, so this is refreshed as data changes.
-    LaunchedEffect(state.sessions) { viewModel.refreshCounts() }
+    // Counts feed the Back up / Delete all dialogs. Refreshed when the set of sessions changes and
+    // again as a dialog opens, not on every 2 s flush of a running session (summaries change with
+    // each write, and the totals query is four COUNTs over the whole table).
+    LaunchedEffect(state.sessions.size, showBackup, showDeleteAll) { viewModel.refreshCounts() }
 
     // ---- launchers -------------------------------------------------------------------------
 

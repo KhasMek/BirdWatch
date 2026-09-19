@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -224,14 +226,17 @@ class SessionManager(
         usbCompanion.disconnect()
         wifiApScanner.stop()
         locationProvider.stop()
-        persistJob?.cancel()
+        // Joined, not just cancelled: a flush that already left the mutex queue must not write
+        // after the final flush below.
+        persistJob?.cancelAndJoin()
         persistJob = null
 
         // Final flush so the last few re-sightings land in the database.
         val snapshot = SourceMerge.mergeAll(allRows())
         if (snapshot.isNotEmpty()) detectionDao.upsertAll(snapshot)
 
-        sessionDao.update(session.copy(endedAt = System.currentTimeMillis()))
+        // Only endedAt is written, so a rename that landed since `session` was read survives.
+        sessionDao.setEndedAt(session.id, System.currentTimeMillis())
         _currentSession.value = null
         Log.i(TAG, "Session ${session.id} ended with ${snapshot.size} devices")
     }
@@ -294,7 +299,7 @@ class SessionManager(
         if (sessionDao.getById(parsed.session.id) != null) throw AlreadyImportedException(parsed.session.id)
         val session = parsed.session.copy(
             label = parsed.session.label ?: "Imported (${parsed.format.label})",
-            origin = SessionOrigin.FILE_IMPORT,
+            origin = SessionOrigin.importedFrom(parsed.session.origin, SessionOrigin.FILE_IMPORT),
         )
         var edits = 0
         db.withTransaction {
@@ -325,17 +330,20 @@ class SessionManager(
         }
         val removed = detectionDao.deleteDevice(mac, ids)
         sampleDao.deleteForDevice(mac, ids)
-        trails.remove(mac)
+        // The trail state belongs to the running session only; deleting from an old session
+        // must not restart the current trail's throttle/cap.
+        if (current != null && current in ids) trails.remove(mac)
         Log.i(TAG, "Deleted $removed detection(s) of $mac from ${ids.size} session(s)")
         removed
     }
 
     /** Rename a session; blank clears the label so the start time shows again. */
-    suspend fun setLabel(sessionId: String, label: String?) {
-        val clean = label?.trim()?.takeIf { it.isNotEmpty() }
+    suspend fun setLabel(sessionId: String, label: String?) = mutex.withLock {
+        val clean = ImportSanitizer.text(label, ImportSanitizer.MAX_LABEL)
         sessionDao.updateLabel(sessionId, clean)
-        // Keep the in-memory current session in step so the Dashboard title follows.
-        _currentSession.value?.let { if (it.id == sessionId) _currentSession.value = it.copy(label = clean) }
+        // Keep the in-memory current session in step so the Dashboard title follows. Under the
+        // mutex and as an atomic update so it cannot resurrect a session stop() just cleared.
+        _currentSession.update { s -> if (s?.id == sessionId) s.copy(label = clean) else s }
         Log.i(TAG, "Session $sessionId renamed to ${clean ?: "<none>"}")
     }
 
@@ -359,8 +367,14 @@ class SessionManager(
         launch {
             mergedDevices.sample(RESIGHT_FLUSH_MS).collect { devices ->
                 if (devices.isEmpty()) return@collect
-                detectionDao.upsertAll(devices)
-                _currentSession.value?.id?.let { sampleTrails(devices, it) }
+                // Under the session mutex: deleteDetections() clears a MAC from the tables and
+                // the database together, and a flush holding a pre-delete snapshot must not put
+                // the row back. The mutex also serialises every touch of `trails`.
+                mutex.withLock {
+                    val sessionId = _currentSession.value?.id ?: return@withLock
+                    detectionDao.upsertAll(devices)
+                    sampleTrails(devices, sessionId)
+                }
             }
         }
     }

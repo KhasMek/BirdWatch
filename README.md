@@ -289,7 +289,8 @@ unless you paste it.
 ## Privacy
 
 Everything stays on your phone. There is no account, no server, no analytics, and no network
-traffic apart from Google Maps tiles when you use the map with your own key. The app opts out
+traffic apart from Google Maps tiles when you open the Map tab (Google sees the tile requests
+and the app's built-in key, never your detections; the map is the only network use). The app opts out
 of Android's cloud backup and device-to-device transfer, so the detection database and your
 Maps key are never copied off the phone by the system; use Sessions > Back up… when you want to
 move data yourself. Exports and backups contain GPS coordinates and timestamps; treat them

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -67,6 +68,7 @@ fun SettingsScreen(
 
     var keyInput by rememberSaveable { mutableStateOf("") }
     var showKey by rememberSaveable { mutableStateOf(false) }
+    var confirmClearTrails by rememberSaveable { mutableStateOf(false) }
     var seeded by rememberSaveable { mutableStateOf(false) }
 
     // Prefill the field once the stored key is known (only on first load, not on every recompose).
@@ -93,13 +95,19 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             // Only builds without a built-in key (debug, forks) need a key from the user. Release
-            // builds ship one, so their users never see this section at all.
-            if (!state.builtInKey) {
+            // builds ship one, so their users never see this section, unless a key was saved
+            // earlier (it still overrides the built-in one, so it must stay visible and clearable).
+            if (!state.builtInKey || state.hasKey) {
                 SectionTitle("Google Maps")
                 Text(
-                    "This build has no built-in map key, so the map needs your own Google Maps API key " +
-                        "(Maps SDK for Android). It is stored encrypted on this device and never leaves it. " +
-                        "Everything else works without one.",
+                    if (state.builtInKey) {
+                        "This build has a built-in map key, but the key you saved earlier takes precedence. " +
+                            "Clear it to use the built-in one."
+                    } else {
+                        "This build has no built-in map key, so the map needs your own Google Maps API key " +
+                            "(Maps SDK for Android). It is stored encrypted on this device and never leaves it. " +
+                            "Everything else works without one."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -219,7 +227,20 @@ fun SettingsScreen(
                 checked = state.trackAllSightings,
                 onCheckedChange = viewModel::setTrackAllSightings,
             )
-            TextButton(onClick = { viewModel.clearTrails(::toast) }) { Text("Clear all trail data") }
+            TextButton(onClick = { confirmClearTrails = true }) { Text("Clear all trail data") }
+            if (confirmClearTrails) {
+                AlertDialog(
+                    onDismissRequest = { confirmClearTrails = false },
+                    title = { Text("Clear all trail data?") },
+                    text = { Text("Every recorded trail point, in every session, is deleted. Detections, pins, aliases and the per-device trail switches are kept. This cannot be undone.") },
+                    confirmButton = {
+                        TextButton(onClick = { confirmClearTrails = false; viewModel.clearTrails(::toast) }) {
+                            Text("Clear", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { confirmClearTrails = false }) { Text("Cancel") } },
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()

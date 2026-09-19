@@ -16,9 +16,10 @@ import kotlinx.coroutines.withContext
 
 /**
  * Secrets the user types in, held in [EncryptedSharedPreferences] (AES-256, Android Keystore
- * master key). Currently just the Google Maps API key. The key never appears in source, build
- * config or the manifest; see [com.khasmek.birdwatch.util.MapsKeyInjector] for how it reaches
- * the Maps SDK at runtime.
+ * master key). Currently just the user's own Google Maps API key, which release builds no longer
+ * need (they carry a built-in key via BuildConfig); it remains the way a debug build or a fork
+ * without a key gets a map. See [com.khasmek.birdwatch.util.MapsKeyInjector] for how whichever
+ * key applies reaches the Maps SDK at runtime.
  *
  * Opening the encrypted store touches the Keystore, so it happens on IO once; [isLoaded] flips
  * when the initial read is done so screens can avoid a "no key" flash.

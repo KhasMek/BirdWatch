@@ -303,7 +303,7 @@ data class SessionDetailUiState(
     /** Sessions each MAC appears in, across the whole database (includes this one). */
     val sessionsPerMac: Map<String, Int> = emptyMap(),
 ) {
-    /** Other sessions that also saw [mac]. */
+    /** Other sessions (earlier or later) that also saw [mac]; the card words it as "in N other sessions". */
     fun priorSessions(mac: String): Int = ((sessionsPerMac[mac] ?: 1) - 1).coerceAtLeast(0)
 }
 

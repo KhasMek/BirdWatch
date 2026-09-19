@@ -32,6 +32,17 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun `firmware detection lines and data-class toStrings are redacted`() {
+        val banner = """[flockyou] DETECT-SSID type=wifi mac=82:6b:f2:14:07:3a ssid="Cam "quoted" name that is very long ${"x".repeat(100)}" rssi=-52 ch=6 count=17"""
+        val out = Diagnostics.scrub(banner)
+        assertFalse(out.contains("82:6b:f2")); assertFalse(out.contains("quoted")); assertFalse(out.contains("xxxx"))
+        val ts = """IllegalStateException: bad row DetectedDevice(sessionId=s1, macAddress=D4:11:D6:AA:BB:CC, deviceName=Penguin-A1, alias=Home cam, notes=pole on NE corner, uasId=1581F123, rssi=-70)"""
+        val out2 = Diagnostics.scrub(ts)
+        for (secret in listOf("Penguin", "Home cam", "pole on", "1581F123", "D4:11")) assertFalse("$secret leaked in: $out2", out2.contains(secret))
+        assertTrue(out2.contains("IllegalStateException")); assertTrue(out2.contains("rssi=-70"))
+    }
+
+    @Test
     fun `a typical stack trace keeps what matters and drops what identifies`() {
         val trace = """
             java.lang.IllegalStateException: Attempting to launch an unregistered ActivityResultLauncher with contract for content://media/1 and input "birdwatch_backup.json"

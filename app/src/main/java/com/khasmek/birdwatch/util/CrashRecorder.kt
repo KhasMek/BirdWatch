@@ -39,7 +39,7 @@ object CrashRecorder {
             appendLine(Diagnostics.line("version", versionName))
             appendLine(Diagnostics.line("thread", thread.name))
             appendLine()
-            append(Diagnostics.scrub(trace).lines().take(MAX_TRACE_LINES).joinToString("\n"))
+            append(Diagnostics.scrub(trace).lines().take(MAX_TRACE_LINES).joinToString("\n") { it.take(MAX_LINE_CHARS) })
         }
         // Synchronous: the process is about to die and there is no later.
         File(context.filesDir, FILE).writeText(text)
@@ -54,4 +54,5 @@ object CrashRecorder {
     }
 
     private const val MAX_TRACE_LINES = 60
+    private const val MAX_LINE_CHARS = 400
 }

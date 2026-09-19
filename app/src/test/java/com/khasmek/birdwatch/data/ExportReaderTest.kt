@@ -78,6 +78,44 @@ class ExportReaderTest {
     }
 
     @Test
+    fun `csv cells that a spreadsheet would run as formulas are neutralised and round-trip`() {
+        // A device name or note the radio / user supplies must not become =HYPERLINK(...) in Excel.
+        assertEquals("'=HYPERLINK(\"x\")", ExportWriter.csvCell("=HYPERLINK(\"x\")").let { it.removeSurrounding("\"").replace("\"\"", "\"") })
+        assertEquals("'+1", ExportWriter.csvCell("+1")); assertEquals("'@cmd", ExportWriter.csvCell("@cmd"))
+        assertEquals("''quoted", ExportWriter.csvCell("'quoted"))
+        // Numbers stay numbers: RSSI and negative coordinates are not text.
+        assertEquals("-52", ExportWriter.csvCell("-52")); assertEquals("-122.987654", ExportWriter.csvCell("-122.987654"))
+        val nasty = raven.copy(deviceName = "=1+1", matchedOn = "-DDE|cmd")
+        val note = DeviceOverride(nasty.macAddress, notes = "@SUM(A1)", alias = "'leading apostrophe", updatedAt = 1L)
+        val back = ExportReader.parse(ExportWriter.csv(listOf(nasty), mapOf(nasty.macAddress to note)), "x.csv")
+        assertEquals(nasty, back.devices.single())
+        assertEquals("@SUM(A1)", back.overrides.single().notes)
+        assertEquals("'leading apostrophe", back.overrides.single().alias)
+        assertEquals(-70, back.devices.single().rssi)
+    }
+
+    @Test
+    fun `session origin is exported and only an esp32 origin survives import`() {
+        val esp = session.copy(origin = SessionOrigin.ESP32_IMPORT)
+        assertEquals(SessionOrigin.ESP32_IMPORT, ExportReader.parse(ExportWriter.json(esp, all, exportedAt = 1L), "x.json").session.origin)
+        assertEquals(SessionOrigin.LIVE, ExportReader.parse(ExportWriter.json(session, all, exportedAt = 1L), "x.json").session.origin)
+        assertEquals(SessionOrigin.ESP32_IMPORT, SessionOrigin.importedFrom(SessionOrigin.ESP32_IMPORT, SessionOrigin.FILE_IMPORT))
+        assertEquals(SessionOrigin.FILE_IMPORT, SessionOrigin.importedFrom(SessionOrigin.LIVE, SessionOrigin.FILE_IMPORT))
+        assertEquals(SessionOrigin.RESTORE, SessionOrigin.importedFrom(SessionOrigin.RESTORE, SessionOrigin.RESTORE))
+        assertEquals(SessionOrigin.RESTORE, SessionOrigin.importedFrom(null, SessionOrigin.RESTORE))
+    }
+
+    @Test
+    fun `timestamps far outside the app's lifetime or past Long range are refused, not crashed on`() {
+        fun withStart(iso: String) = ExportWriter.json(session, all, exportedAt = 1L).replace(Regex("\"started_at\":\\s*\"[^\"]*\""), "\"started_at\": \"$iso\"")
+        for (bad in listOf("+999999999-12-31T23:59:59Z", "1969-12-31T23:59:59Z", "2250-01-01T00:00:00Z", "not a date", "2026-13-40T00:00:00Z")) {
+            val e = assertThrows(ImportFormatException::class.java) { ExportReader.parse(withStart(bad), "x.json") }
+            assertTrue(e.message, e.message!!.contains("timestamp", ignoreCase = true))
+        }
+        assertEquals(session.startedAt, ExportReader.parse(withStart(ExportWriter.iso(session.startedAt)), "x.json").session.startedAt)
+    }
+
+    @Test
     fun `csv records tokenizer handles CRLF, blank lines and a missing trailing newline`() {
         val records = ExportReader.parseCsvRecords("a,b\r\n\r\n\"x\r\ny\",\"q\"\"q\"\n\nlast,row")
         assertEquals(listOf(listOf("a", "b"), listOf("x\r\ny", "q\"q"), listOf("last", "row")), records)

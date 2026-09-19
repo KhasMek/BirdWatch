@@ -69,12 +69,11 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
 
     fun playFor(device: DetectedDevice, priorSessions: Int = 0) {
         if (!settings.audioAlerts.value) return
-        val id = when {
-            priorSessions > 0 && settings.quietKnownAlerts.value -> tickId
-            device.confidence == Confidence.HIGH -> chirpId
-            else -> blipId
-        }
-        play(id)
+        val normal = if (device.confidence == Confidence.HIGH) chirpId else blipId
+        val quiet = priorSessions > 0 && settings.quietKnownAlerts.value
+        // A known device gets the tick; if that tone failed to load, the normal alert is still
+        // better than silence.
+        if (!quiet || !play(tickId)) play(normal)
     }
 
     /** Preview for the settings screen. False if the tones are not loaded yet. */
@@ -90,9 +89,11 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
 
     private fun loadTones() {
         try {
-            val chirp = File(appContext.cacheDir, "chirp_high.wav")
-            val blip = File(appContext.cacheDir, "blip_low.wav")
-            val tick = File(appContext.cacheDir, "tick_known.wav")
+            // Versioned names: a cached file from an older build is never played by mistake
+            // when a tone's synthesis changes. Bump TONE_VERSION with any change in ToneSynth.
+            val chirp = File(appContext.cacheDir, "chirp_high_$TONE_VERSION.wav")
+            val blip = File(appContext.cacheDir, "blip_low_$TONE_VERSION.wav")
+            val tick = File(appContext.cacheDir, "tick_known_$TONE_VERSION.wav")
             if (!chirp.exists()) writeWav(chirp, ToneSynth.chirp())
             if (!blip.exists()) writeWav(blip, ToneSynth.blip())
             if (!tick.exists()) writeWav(tick, ToneSynth.tick())
@@ -110,6 +111,7 @@ class AlertSounds(context: Context, private val settings: AppSettings) {
 
     companion object {
         private const val TAG = "BirdWatch/Audio"
+        private const val TONE_VERSION = "v2"
     }
 }
 

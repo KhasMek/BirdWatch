@@ -87,6 +87,9 @@ object ExportWriter {
         put("started_at", iso(session.startedAt))
         put("ended_at", session.endedAt?.let { JsonPrimitive(iso(it)) } ?: JsonNull)
         put("label", session.label?.let { JsonPrimitive(it) } ?: JsonNull)
+        // Where the session came from (v7). On import, ESP32_IMPORT is kept (it explains the
+        // missing GPS and anchored timestamps); anything else becomes FILE_IMPORT / RESTORE.
+        put("origin", session.origin.name)
         put("device_count", deviceCount)
     }
 
@@ -309,8 +312,19 @@ object ExportWriter {
     /** "20260910T160025Z" for file names. */
     fun isoCompact(epochMs: Long): String = iso(epochMs).replace("-", "").replace(":", "").substringBefore('.').removeSuffix("Z") + "Z"
 
-    fun csvCell(v: String): String =
-        if (v.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + v.replace("\"", "\"\"") + "\"" else v
+    /**
+     * Quote when needed, and neutralise spreadsheet formula injection: a device name or note that
+     * starts with `=`, `+`, `-`, `@` (or an apostrophe, so the guard round-trips) gets a leading
+     * apostrophe, which Excel/Sheets/LibreOffice treat as "text". Numbers are exempt so RSSI and
+     * negative coordinates stay numeric. [ExportReader] strips the apostrophe on import.
+     */
+    fun csvCell(v: String): String {
+        val guarded = if (v.isNotEmpty() && v[0] in FORMULA_TRIGGERS && !NUMERIC.matches(v)) "'$v" else v
+        return if (guarded.any { it == ',' || it == '"' || it == '\n' || it == '\r' }) "\"" + guarded.replace("\"", "\"\"") + "\"" else guarded
+    }
+
+    private const val FORMULA_TRIGGERS = "=+-@'\t\r"
+    private val NUMERIC = Regex("""-?\d+(\.\d+)?""")
 
     fun xml(s: String): String = s
         .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

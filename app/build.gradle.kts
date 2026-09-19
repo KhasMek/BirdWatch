@@ -51,10 +51,18 @@ val releaseStoreFile: String? = signingValue("ANDROID_KEYSTORE_FILE", "storeFile
 // this package + the release signing certificate + the "Maps SDK for Android" API only. Users
 // then need no setup at all. Comes from BIRDWATCH_MAPS_KEY (CI secret) or `mapsApiKey` in the
 // gitignored keystore.properties; absent, the map falls back to a key entered in Settings.
-// Debug builds are signed with a different certificate, so the restricted key will not work in
-// them unless that certificate's SHA-1 is also added to the key; Settings override covers dev.
+// Applied to the RELEASE build type only: debug builds are signed with a different certificate,
+// so the restricted key would give them grey tiles while hiding the Settings field that could
+// fix it. A debug build always uses the key entered in Settings.
 // ---------------------------------------------------------------------------------------------
 val builtInMapsKey: String = signingValue("BIRDWATCH_MAPS_KEY", "mapsApiKey")?.trim().orEmpty()
+// Fail early on a mispasted secret rather than shipping a release whose map never loads.
+if (builtInMapsKey.isNotEmpty() && !Regex("^AIza[0-9A-Za-z_-]{35}$").matches(builtInMapsKey)) {
+    throw GradleException(
+        "The built-in Google Maps key (BIRDWATCH_MAPS_KEY / mapsApiKey) does not look like a Maps API key " +
+            "(expected 39 characters starting with \"AIza\"). Fix or remove it."
+    )
+}
 
 // A versioned build is a real release: never let it fall back to the debug key silently.
 if (requestedVersion != null && releaseStoreFile == null) {
@@ -79,10 +87,11 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Empty when no key is configured; the manifest placeholder then stays empty and the app
-        // uses whatever the user enters in Settings.
-        manifestPlaceholders["mapsApiKey"] = builtInMapsKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$builtInMapsKey\"")
+        // No built-in key by default (debug, and release without one configured): the manifest
+        // placeholder stays empty and the app uses whatever the user enters in Settings. The
+        // release build type overrides both below.
+        manifestPlaceholders["mapsApiKey"] = ""
+        buildConfigField("String", "MAPS_API_KEY", "\"\"")
     }
 
     signingConfigs {
@@ -106,10 +115,14 @@ android {
             )
             signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release")
             else signingConfigs.getByName("debug")
+            // The one build that carries the built-in Maps key (see above). Empty when none is
+            // configured, in which case Settings supplies a key as in debug.
+            manifestPlaceholders["mapsApiKey"] = builtInMapsKey
+            buildConfigField("String", "MAPS_API_KEY", "\"$builtInMapsKey\"")
         }
         debug {
-            // Same applicationId as release on purpose (one install identity, one Maps key
-            // restriction); only the visible version string marks a dev build.
+            // Same applicationId as release on purpose (one install identity); only the visible
+            // version string marks a dev build. No built-in Maps key: enter one in Settings.
             versionNameSuffix = "-debug"
         }
     }

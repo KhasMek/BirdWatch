@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -227,7 +228,7 @@ private fun MapContent(state: MapUiState, viewModel: MapViewModel) {
                 // and more solid the stronger the signal, so the cluster near the device stands out.
                 if (trailPin != null) {
                     val base = DetectionColors.forCategory(trailPin.category)
-                    state.trail.forEach { s ->
+                    state.drawnTrail.forEach { s ->
                         key(s.id) {
                             val strength = ((s.rssi + 100).coerceIn(0, 60)) / 60f // 0 = -100 dBm, 1 = -40 dBm
                             Circle(
@@ -377,7 +378,7 @@ private fun MapHeader(state: MapUiState, viewModel: MapViewModel, onShowHidden: 
             // a highlighted chip is shown on the map, a plain one is hidden.
             val categories = state.presentCategories
             val hiddenByUser = state.hiddenByUser.size
-            if (categories.size > 1 || hiddenByUser > 0) {
+            if (state.showCategoryChips || hiddenByUser > 0) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -386,7 +387,7 @@ private fun MapHeader(state: MapUiState, viewModel: MapViewModel, onShowHidden: 
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (categories.size > 1) {
+                    if (state.showCategoryChips) {
                         categories.forEach { c ->
                             val shown = c !in state.hidden
                             FilterChip(
@@ -654,7 +655,7 @@ private fun HiddenDevicesDialog(pins: List<MapPin>, onShow: (String) -> Unit, on
         onDismissRequest = onDismiss,
         title = { Text("Hidden devices") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 if (pins.isEmpty()) Text("Nothing is hidden.", style = MaterialTheme.typography.bodyMedium)
                 pins.forEach { pin ->
                     Row(

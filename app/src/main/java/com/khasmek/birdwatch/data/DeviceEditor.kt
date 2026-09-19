@@ -1,6 +1,7 @@
 package com.khasmek.birdwatch.data
 
 import android.util.Log
+import androidx.room.withTransaction
 import com.khasmek.birdwatch.detection.DetectionTable
 
 /**
@@ -23,14 +24,14 @@ class DeviceEditor(private val db: DetectionDatabase, private val sessionManager
         edit(mac, "Pin back at the detected position") { it.copy(latitude = null, longitude = null) }
 
     suspend fun setAlias(mac: String, alias: String?): String {
-        val clean = alias?.trim()?.takeIf { it.isNotEmpty() }
+        val clean = ImportSanitizer.text(alias, ImportSanitizer.MAX_ALIAS)
         return edit(mac, if (clean == null) "Alias cleared" else "Alias set") { it.copy(alias = clean) }
     }
 
-    /** Alias and notes together, as the edit dialog saves them. */
+    /** Alias and notes together, as the edit dialog saves them. Same caps as an imported file. */
     suspend fun setDetails(mac: String, alias: String?, notes: String?): String {
-        val cleanAlias = alias?.trim()?.takeIf { it.isNotEmpty() }
-        val cleanNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
+        val cleanAlias = ImportSanitizer.text(alias, ImportSanitizer.MAX_ALIAS)
+        val cleanNotes = ImportSanitizer.text(notes, ImportSanitizer.MAX_NOTES)
         val done = when {
             cleanAlias == null && cleanNotes == null -> "Alias and notes cleared"
             cleanNotes == null -> "Alias saved"
@@ -68,9 +69,13 @@ class DeviceEditor(private val db: DetectionDatabase, private val sessionManager
     private suspend fun edit(mac: String, done: String, change: (DeviceOverride) -> DeviceOverride): String {
         val key = DetectionTable.normalizeMac(mac)
         return runCatching {
-            val current = dao.get(key) ?: DeviceOverride(key)
-            val next = change(current).copy(updatedAt = System.currentTimeMillis())
-            if (next.isEmpty) dao.delete(key) else dao.upsert(next)
+            // Read-modify-write in one transaction so two quick edits (alias from the dialog, a
+            // pin move from the map) cannot each overwrite the other's field.
+            db.withTransaction {
+                val current = dao.get(key) ?: DeviceOverride(key)
+                val next = change(current).copy(updatedAt = System.currentTimeMillis())
+                if (next.isEmpty) dao.delete(key) else dao.upsert(next)
+            }
         }.fold(
             onSuccess = { done },
             onFailure = { Log.e(TAG, "edit failed", it); "Couldn't save: ${it.message}" },

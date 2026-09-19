@@ -188,8 +188,14 @@ fun mergeDetection(local: DetectedDevice, incoming: DetectedDevice): DetectedDev
     val newer = if (incoming.lastSeen > local.lastSeen) incoming else local
     val older = if (newer === incoming) local else incoming
     val best = if ((incoming.tier ?: -1) > (local.tier ?: -1)) incoming else local
+    // The newer row wins, but a fix is never thrown away for a null: an ESP32 import (no GPS)
+    // merged over a live row keeps the live row's coordinates.
+    val fix = if (newer.hasLocation) newer else older
     return newer.copy(
         sessionId = local.sessionId,
+        latitude = fix.latitude,
+        longitude = fix.longitude,
+        accuracyMeters = fix.accuracyMeters,
         deviceName = newer.deviceName ?: older.deviceName,
         detectionMethod = best.detectionMethod,
         confidence = best.confidence,

@@ -211,6 +211,8 @@ fun SessionDetailScreen(
                                 onDelete = { deleteMac = device.macAddress },
                             ),
                             priorSessions = state.priorSessions(device.macAddress),
+                            // Counts every other session, later ones included, so not "before".
+                            priorSessionsTag = state.priorSessions(device.macAddress).let { "in $it other session${if (it == 1) "" else "s"}" },
                         )
                     }
                 }

@@ -76,7 +76,9 @@ class DiagnosticsReport(private val container: AppContainer) {
             appendLine(Diagnostics.line("  usb_lines", usb.linesReceived))
             appendLine(Diagnostics.line("  usb_detections", usb.detectionsReceived))
             appendLine(Diagnostics.line("  firmware_config", usb.config?.let { "beepMask=${it.beepMask} ouiCount=${it.ouiCount}" }))
-            appendLine(Diagnostics.line("  firmware_banner", usb.lastText?.let(Diagnostics::scrub)))
+            // Deliberately no firmware text lines: the firmware prints per-detection lines to the
+            // same port, and even a scrubbed one would say what was seen. Presence only.
+            appendLine(Diagnostics.line("  firmware_heartbeat_seen", usb.lastText != null))
             appendLine(Diagnostics.line("  gps_tracking", loc.isTracking))
             appendLine(Diagnostics.line("  gps_has_fix", loc.hasFix))
             appendLine(Diagnostics.line("  gps_accuracy_m", loc.fix?.accuracyMeters?.toInt()))
@@ -100,7 +102,8 @@ class DiagnosticsReport(private val container: AppContainer) {
             appendLine(Diagnostics.line("  trail_points", db.sightingSampleDao().countAll()))
             appendLine()
             appendLine("Last crash")
-            appendLine(CrashRecorder.lastCrash(ctx) ?: "none recorded")
+            // Scrubbed again on the way out, so a file written by an older scrubber gets today's rules.
+            appendLine(CrashRecorder.lastCrash(ctx)?.let(Diagnostics::scrub) ?: "none recorded")
         }
     }
 }

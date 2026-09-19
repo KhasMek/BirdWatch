@@ -137,9 +137,13 @@ field read from outside.
 "Copy diagnostics" builds a clipboard report of versions, states and counts, plus the last
 uncaught exception, which `CrashRecorder` (installed in `BirdWatchApp.onCreate`) writes to
 private storage *after* `Diagnostics.scrub` redacts MACs, coordinates, storage paths / content
-URIs and quoted strings. **Never add detections, coordinates, MACs, names, notes, or logcat to
-the report**: it is designed to be pasted into public GitHub issues. Free-text fields go through
-`scrub`; `DiagnosticsTest` pins the redaction rules.
+URIs, quoted strings and `field=value` pairs for every user/radio-text field name (as data-class
+`toString()` prints them); the crash record is scrubbed again when the report is built. **Never
+add detections, coordinates, MACs, names, notes, logcat, or firmware text lines to the report**
+(the ESP32 prints one plain-text line per detection; `UsbCompanion.lastText` keeps only the
+`scanning` heartbeat and the report says just whether one was seen): it is designed to be
+pasted into public GitHub issues. Free-text fields go through `scrub`; `DiagnosticsTest` pins
+the redaction rules.
 
 ## Data model
 
@@ -285,7 +289,7 @@ per session, export-only) and `BackupReader` (JSON/CSV, also accepts a single-se
 (`CreateDocument`), and **merges** on restore: missing sessions/devices are inserted, an
 existing device is combined with `mergeDetection` (newer record wins per-sighting fields; span,
 sightings, tier and a learned name are the max of both) so an old backup never regresses a row;
-`devicesUpdated` counts only rows that changed. `deleteAll` wipes both tables. Sessions overflow
+`devicesUpdated` counts only rows that changed. `deleteAll` wipes all four tables. Sessions overflow
 menu: Import from ESP32…, Import session…, | Back up…, Restore…, | Delete all data….
 Per-session export/share is unchanged on purpose. CSV is read by a record-level tokenizer
 (`ExportReader.parseCsvRecords`) because quoted cells may contain line breaks.
@@ -349,11 +353,14 @@ Release builds ship the project's own key (the Maps SDK for Android has no per-l
 key is restricted in the Cloud Console to the package + release certificate SHA-1 + the Android
 Maps SDK API). It enters the build as `BIRDWATCH_MAPS_KEY` (CI secret `MAPS_API_KEY`) or
 `mapsApiKey` in the gitignored `keystore.properties`, and lands in `BuildConfig.MAPS_API_KEY` and
-the manifest `${mapsApiKey}` placeholder. **No literal key ever goes in source or the manifest.**
-A key the user enters in Settings (stored in `EncryptedSharedPreferences`) takes precedence:
-`MapsKeyInjector.effectiveKey(userKey)` picks, and the injector writes it into
-`ApplicationInfo.metaData` before the map loads. The Settings "Google Maps" section is shown
-**only in builds without a built-in key** (debug, forks); release users never see a key field.
+the manifest `${mapsApiKey}` placeholder, **in the release build type only** (debug builds are
+signed with another certificate, so the restricted key would only give them grey tiles; a debug
+build takes its key from Settings). The build fails on a value that is not 39 chars / `AIza…`.
+**No literal key ever goes in source or the manifest.** A key the user enters in Settings
+(stored in `EncryptedSharedPreferences`) takes precedence: `MapsKeyInjector.effectiveKey(userKey)`
+picks, and the injector writes it into `ApplicationInfo.metaData` before the map loads. The
+Settings "Google Maps" section is shown in builds without a built-in key (debug, forks) and,
+in a release build, only while a previously saved user key exists (so it can be cleared).
 The user-key path may be removed entirely later. Help link: https://developers.google.com/maps/documentation/android-sdk/get-api-key
 
 ## Phases

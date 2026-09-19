@@ -39,6 +39,10 @@ interface SessionDao {
     @Query("UPDATE scan_sessions SET label = :label WHERE id = :id")
     suspend fun updateLabel(id: String, label: String?)
 
+    /** Close a session without touching any other column (a concurrent rename must survive). */
+    @Query("UPDATE scan_sessions SET endedAt = :endedAt WHERE id = :id")
+    suspend fun setEndedAt(id: String, endedAt: Long)
+
     @Query("DELETE FROM scan_sessions WHERE id = :id")
     suspend fun deleteById(id: String)
 

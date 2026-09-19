@@ -83,8 +83,10 @@ fun DeviceCard(
     /** The user's edits for this MAC (alias shown as the title, hidden / moved shown as tags). */
     override: DeviceOverride? = null,
     actions: DeviceCardActions? = null,
-    /** Earlier sessions that also recorded this MAC; > 0 shows a "seen N× before" tag. */
+    /** Earlier sessions that also recorded this MAC; > 0 shows the [priorSessionsTag]. */
     priorSessions: Int = 0,
+    /** Wording of that tag; a past session's list says "in N other sessions" instead. */
+    priorSessionsTag: String = "seen ${priorSessions}× before",
 ) {
     var expanded by rememberSaveable(device.macAddress) { mutableStateOf(initiallyExpanded) }
     val typeColor = DetectionColors.forType(device.deviceType)
@@ -137,7 +139,7 @@ fun DeviceCard(
                         onColor = MaterialTheme.colorScheme.onErrorContainer)
                 }
                 if (priorSessions > 0) {
-                    Tag(text = "seen ${priorSessions}× before", color = MaterialTheme.colorScheme.primaryContainer,
+                    Tag(text = priorSessionsTag, color = MaterialTheme.colorScheme.primaryContainer,
                         onColor = MaterialTheme.colorScheme.onPrimaryContainer)
                 }
                 if (override?.hidden == true) {

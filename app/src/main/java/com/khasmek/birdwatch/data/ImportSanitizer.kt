@@ -18,6 +18,14 @@ object ImportSanitizer {
     const val MAX_ID_FIELD = 64
     const val MAX_SIGHTINGS = 10_000_000
 
+    /**
+     * The epoch .. 2200-01-01T00:00:00Z. Generous on purpose (a phone with a wrong clock still
+     * writes a valid file); the point is to refuse the ±billion-year values ISO-8601 allows,
+     * which overflow arithmetic and pin a session to the end of every list.
+     */
+    const val MIN_EPOCH_MS = 0L
+    const val MAX_EPOCH_MS = 7_258_118_400_000L
+
     /** "aa:bb:cc:dd:ee:ff" in either case, colon-separated, nothing else. */
     fun isValidMac(s: String?): Boolean = s != null && MAC.matches(s.trim())
 
