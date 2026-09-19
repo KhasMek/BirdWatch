@@ -1,5 +1,7 @@
 package com.khasmek.birdwatch.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -243,6 +245,27 @@ fun SettingsScreen(
                     tag = if (pack.beta) "BETA" else null,
                 )
             }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
+            SectionTitle("Troubleshooting")
+            Text(
+                "Copy diagnostics puts a short report on the clipboard to paste into a bug report: app and Android " +
+                    "versions, permission and radio states, settings, how many sessions and detections you have, and " +
+                    "the last crash if there was one. It never includes detections, addresses, coordinates, names or " +
+                    "notes, and nothing is sent anywhere unless you paste it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = {
+                viewModel.buildDiagnostics { text ->
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("BirdWatch diagnostics", text))
+                    toast("Diagnostics copied to the clipboard")
+                }
+            }) { Text("Copy diagnostics") }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()

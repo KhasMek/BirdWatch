@@ -8,6 +8,8 @@ import com.khasmek.birdwatch.data.SecureSettings
 import com.khasmek.birdwatch.detection.PackId
 import com.khasmek.birdwatch.detection.SignaturePack
 import com.khasmek.birdwatch.detection.SignaturePacks
+import com.khasmek.birdwatch.util.Diagnostics
+import com.khasmek.birdwatch.util.DiagnosticsReport
 import com.khasmek.birdwatch.util.MapsKeyInjector
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -112,6 +114,15 @@ class SettingsViewModel(private val container: AppContainer) : ViewModel() {
     /** Delete every stored trail point; the outcome goes to [onResult] for a toast. */
     fun clearTrails(onResult: (String) -> Unit) {
         viewModelScope.launch { onResult(container.deviceEditor.clearTrails()) }
+    }
+
+    /** Build the diagnostics text (versions, states, counts, last crash) for the clipboard. */
+    fun buildDiagnostics(onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            val text = runCatching { DiagnosticsReport(container).build() }
+                .getOrElse { "BirdWatch diagnostics could not be built: ${Diagnostics.scrub(it.toString())}" }
+            onReady(text)
+        }
     }
     /** False if the tones are not ready yet (they are synthesised on first use). */
     fun playTestChirp(): Boolean = container.alertSounds.playTest()

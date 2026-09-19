@@ -277,6 +277,15 @@ board has no clock; their tier, channel, signal and sighting counts are preserve
 **Audio.** A two-note chirp for a high-confidence detection, a single blip for a low-confidence
 one, mirroring the ESP32 firmware's buzzer. Mute from the dashboard or Settings.
 
+## Reporting a problem
+
+Settings > *Copy diagnostics* puts a short text report on the clipboard to paste into a
+[GitHub issue](../../issues): app and Android versions, permission and radio states, your
+settings, how many sessions and detections you have, and the last crash if there was one. It
+never contains detections, addresses, coordinates, names or notes, and crash traces are
+scrubbed of anything that looks like one before they are even saved. Nothing is sent anywhere
+unless you paste it.
+
 ## Privacy
 
 Everything stays on your phone. There is no account, no server, no analytics, and no network

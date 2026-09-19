@@ -15,6 +15,7 @@ import com.khasmek.birdwatch.location.LocationProvider
 import com.khasmek.birdwatch.usb.UsbCompanion
 import com.khasmek.birdwatch.wifi.WifiApScanner
 import kotlinx.coroutines.CoroutineScope
+import com.khasmek.birdwatch.util.CrashRecorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -56,6 +57,9 @@ class BirdWatchApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // Record uncaught exceptions (scrubbed) for Settings > Copy diagnostics; Android's own
+        // handler still runs afterwards.
+        CrashRecorder.install(this, BuildConfig.VERSION_NAME)
         container = AppContainer(this)
         // Audio alerts follow every session regardless of which screen is open.
         container.alertSounds.start(container.sessionManager.newDetections, container.appScope, container.sessionManager::priorSessions)

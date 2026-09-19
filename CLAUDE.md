@@ -117,8 +117,16 @@ app/src/main/java/com/khasmek/birdwatch/
 │   ├── theme/                     # Theme, DetectionColors (fill + dark-safe text variants)
 │   ├── screens/                   # Dashboard, Map, PreviousSession(+Detail), Settings, About
 │   └── components/                # DeviceCard, StatsBar, dialogs
-└── util/                          # Permissions, TimeFormat, MapsKeyInjector
+└── util/                          # Permissions, TimeFormat, MapsKeyInjector, Diagnostics(+Report), CrashRecorder
 ```
+
+**Diagnostics** (`util/Diagnostics.kt`, `DiagnosticsReport.kt`, `CrashRecorder.kt`): Settings >
+"Copy diagnostics" builds a clipboard report of versions, states and counts, plus the last
+uncaught exception, which `CrashRecorder` (installed in `BirdWatchApp.onCreate`) writes to
+private storage *after* `Diagnostics.scrub` redacts MACs, coordinates, storage paths / content
+URIs and quoted strings. **Never add detections, coordinates, MACs, names, notes, or logcat to
+the report**: it is designed to be pasted into public GitHub issues. Free-text fields go through
+`scrub`; `DiagnosticsTest` pins the redaction rules.
 
 ## Data model
 
